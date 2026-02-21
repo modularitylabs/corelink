@@ -79,17 +79,19 @@ export class PluginRegistry {
       // Register plugin
       this.plugins.set(plugin.id, plugin);
 
-      // Register tools
+      // Register tools with plugin prefix to make them unique
       const standardTools = plugin.getStandardTools();
       for (const tool of standardTools) {
-        this.toolToPlugin.set(tool.name, plugin.id);
+        const uniqueName = `${plugin.id}__${tool.name}`;
+        this.toolToPlugin.set(uniqueName, plugin.id);
       }
 
       // Register native tools if available
       if (plugin.getNativeTools) {
         const nativeTools = plugin.getNativeTools();
         for (const tool of nativeTools) {
-          this.toolToPlugin.set(tool.name, plugin.id);
+          const uniqueName = `${plugin.id}__${tool.name}`;
+          this.toolToPlugin.set(uniqueName, plugin.id);
         }
       }
 
@@ -126,12 +128,13 @@ export class PluginRegistry {
 
   /**
    * Convert CoreLink tool definition to MCP tool format
+   * Tool names are prefixed with plugin ID to ensure uniqueness
    */
   private convertToMCPTool(tool: ToolDefinition, plugin: ICoreLinkPlugin): Tool {
     return {
-      name: tool.name,
+      name: `${plugin.id}__${tool.name}`,
       description: `[${plugin.name}] ${tool.description}`,
-      inputSchema: tool.inputSchema as { type: 'object'; properties?: Record<string, unknown> },
+      inputSchema: tool.inputSchema as any,
     };
   }
 

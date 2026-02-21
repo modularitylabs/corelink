@@ -27,6 +27,10 @@ import { initDatabase, runMigrations } from './db/index.js';
 import { CredentialManager } from './services/credential-manager.js';
 import { oauthRoutes } from './routes/oauth.js';
 import { outlookOAuthRoutes } from './routes/outlook-oauth.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { PluginRegistry } from './mcp/plugin-registry.js';
+import { MCPSessionManager } from './mcp/http-handler.js';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -99,6 +103,104 @@ async function start() {
   // Initialize services
   const credentialManager = new CredentialManager(db);
 
+  // Initialize MCP server and plugin registry
+  const pluginRegistry = new PluginRegistry(db);
+  await pluginRegistry.loadPlugins();
+
+  const mcpServer = new McpServer(
+    {
+      name: 'CoreLink Gateway',
+      version: '0.1.0',
+    },
+    {
+      capabilities: {
+        tools: {},
+      },
+    }
+  );
+
+  // Register all plugin tools with MCP server
+  const tools = await pluginRegistry.getAllTools();
+  for (const tool of tools) {
+    mcpServer.registerTool(
+      tool.name,
+      {
+        description: tool.description,
+        inputSchema: tool.inputSchema as any,
+      },
+      async (args: any): Promise<CallToolResult> => {
+        const plugin = await pluginRegistry.getPluginForTool(tool.name);
+        if (!plugin) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error: Plugin not found for tool: ${tool.name}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        // Extract original tool name (remove plugin ID prefix)
+        // Format is: pluginId__toolName
+        const originalToolName = tool.name.split('__')[1] || tool.name;
+
+        // Get credentials
+        const credentials = await credentialManager.getCredentials(plugin.id);
+        if (!credentials) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error: Plugin "${plugin.name}" is not authenticated. Please connect it first via the web dashboard at http://localhost:${PORT}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        // Execute tool
+        try {
+          const result = await plugin.execute(
+            originalToolName,
+            args || {},
+            {
+              auth: credentials,
+              settings: {},
+              logger: (message: string, level = 'info') => {
+                console.log(`[${plugin.id}] [${level}] ${message}`);
+              },
+            }
+          );
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result.data, null, 2),
+              },
+            ],
+          };
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error executing ${originalToolName}: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+    );
+  }
+
+  // Create MCP session manager
+  const mcpSessionManager = new MCPSessionManager();
+
   // Create Fastify instance
   const fastify = Fastify({
     logger: {
@@ -106,15 +208,25 @@ async function start() {
     },
   });
 
-  // Enable CORS for web UI
+  // Enable CORS for web UI and MCP
   await fastify.register(cors, {
     origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
     credentials: true,
+    exposedHeaders: ['Mcp-Session-Id', 'Last-Event-Id', 'Mcp-Protocol-Version'],
   });
 
   // Health check
   fastify.get('/health', async () => {
-    return { status: 'ok', version: '0.1.0' };
+    return {
+      status: 'ok',
+      version: '0.1.0',
+      mcp: {
+        enabled: true,
+        sessions: mcpSessionManager.getSessionCount(),
+        plugins: pluginRegistry.getPluginCount(),
+        tools: tools.length,
+      },
+    };
   });
 
   // Register OAuth routes
@@ -122,6 +234,30 @@ async function start() {
     await oauthRoutes(instance, credentialManager);
     await outlookOAuthRoutes(instance, credentialManager);
   });
+
+  // Register MCP HTTP routes
+  fastify.post('/mcp', async (request, reply) => {
+    await mcpSessionManager.handleRequest(request, reply, mcpServer);
+  });
+
+  fastify.get('/mcp', async (request, reply) => {
+    await mcpSessionManager.handleRequest(request, reply, mcpServer);
+  });
+
+  fastify.delete('/mcp', async (request, reply) => {
+    await mcpSessionManager.handleRequest(request, reply, mcpServer);
+  });
+
+  // Graceful shutdown
+  const shutdown = async () => {
+    console.log('\n[CoreLink] Shutting down gracefully...');
+    await mcpSessionManager.cleanup();
+    await fastify.close();
+    process.exit(0);
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 
   // Start server
   try {
@@ -131,13 +267,19 @@ async function start() {
 ║                                                   ║
 ║   🔗 CoreLink Gateway Server                     ║
 ║                                                   ║
-║   Server:  http://localhost:${PORT}                ║
-║   Status:  Running                                ║
+║   HTTP API:  http://localhost:${PORT}              ║
+║   MCP Server: http://localhost:${PORT}/mcp         ║
+║   Status:    Running                              ║
+║                                                   ║
+║   📊 Stats:                                        ║
+║   - Plugins loaded: ${pluginRegistry.getPluginCount()}                           ║
+║   - Tools available: ${tools.length}                          ║
 ║                                                   ║
 ║   Next steps:                                     ║
-║   1. Start the web UI: npm run dev -w @corelink/web
+║   1. Start web UI: npm run dev -w @corelink/web   ║
 ║   2. Visit http://localhost:5173                  ║
-║   3. Connect Gmail or Outlook                     ║
+║   3. Connect Gmail/Outlook via OAuth              ║
+║   4. Connect AI agents to http://localhost:${PORT}/mcp ║
 ║                                                   ║
 ╚═══════════════════════════════════════════════════╝
     `);

@@ -83,14 +83,25 @@ npm run dev -w @corelink/web
 
 ### Connect AI Agents via MCP
 
-CoreLink now includes a fully functional MCP server! Connect it to Claude Code or other AI agents:
+CoreLink includes an HTTP-based MCP server that runs automatically with the gateway - no separate process needed!
 
-```bash
-# Start the MCP server (Terminal 3)
-npm run dev:mcp -w @corelink/gateway
+**Claude Code Configuration:**
+
+Add this to `~/.config/claude-code/config.json`:
+
+```json
+{
+  "mcpServers": {
+    "corelink": {
+      "url": "http://localhost:3000/mcp"
+    }
+  }
+}
 ```
 
-**For Claude Code setup**, see [MCP_SETUP.md](./MCP_SETUP.md) for detailed instructions.
+That's it! No paths, no working directories - just a URL. Restart Claude Code and start using your connected services.
+
+**For detailed setup and troubleshooting**, see [MCP_SETUP.md](./MCP_SETUP.md).
 
 ### Next Steps
 
