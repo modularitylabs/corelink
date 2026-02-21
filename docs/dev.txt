@@ -1,0 +1,700 @@
+No apologies needed—you’re absolutely right. Decoupling the **Engine** (Logic) from the **Interface** (Web Client) is the fastest path to a working prototype. It allows you to build the "Brain" in pure TypeScript and the "Face" in whatever web framework you're most comfortable with.
+
+Here is the **CoreLink Headless Specification**.
+
+---
+
+## 1. The Architecture: "The Local API Hub"
+
+CoreLink will run as a local Node.js process. It acts as a **dual-interface server**:
+
+1. **To the Agent:** It speaks **MCP (JSON-RPC)** via Stdio or HTTP.
+2. **To the User:** It speaks **REST/WebSockets** via Localhost to your Web UI.
+
+### The "Universal Adapter" Logic Flow:
+
+1. **AI Agent** calls `list_emails()` on the MCP port.
+2. **CoreLink Server** checks the `policy.json` (synced from your UI).
+3. **CoreLink Server** fetches from Gmail via the Plugin.
+4. **CoreLink Server** pushes a "Log Event" to the **Web Client** via WebSocket so you see the activity in real-time.
+
+---
+
+## 2. Technical Stack (The "Fast-Path")
+
+* **Language:** TypeScript
+* **Runtime:** **Bun** (Recommended for speed and built-in SQLite/WebSocket support) or **Node.js**.
+* **Server Framework:** **Hono** (Ultra-fast, small, and works across all JS runtimes).
+* **Database:** **SQLite** (One file: `corelink.db`).
+* **Web UI:** **Next.js** or **Vite + React** (Running on `localhost:3000`).
+
+---
+
+## 3. The "Plugin" Directory Structure
+
+To keep it open-source friendly, plugins are just folders in a `~/.corelink/plugins` directory:
+
+```text
+~/.corelink/
+├── config.json       # Rules & App Preferences
+├── corelink.db       # Audit Logs & OAuth Tokens (Encrypted)
+└── plugins/
+    ├── gmail/
+    │   ├── index.ts  # The Logic
+    │   └── manifest.json
+    └── apple-notes/
+        └── index.ts
+
+```
+
+---
+
+## 4. The Implementation: Basic Server Boilerplate
+
+Here is the "Skeleton" of your headless server using **Hono** and the **MCP SDK**.
+
+### `server.ts`
+
+```typescript
+import { Hono } from 'hono';
+import { serve } from '@hono/node-server'; // or Bun.serve
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+
+const app = new Hono();
+const mcpServer = new Server({ name: "CoreLink-Gateway", version: "1.0.0" }, { capabilities: { tools: {} } });
+
+// --- 1. THE WEB CLIENT API ---
+app.get('/status', (c) => c.json({ status: 'running', plugins: ['gmail', 'todoist'] }));
+
+app.post('/update-policy', async (c) => {
+  const body = await c.req.json();
+  // Update local SQLite/Config with new rules
+  return c.json({ success: true });
+});
+
+// --- 2. THE PLUGIN ABSTRACTION ---
+// This handles the "Service Abstraction" (Todoist vs Microsoft ToDo)
+async function getTasksProvider() {
+  const config = await loadConfig(); // Load from local JSON
+  return config.taskProvider; // returns 'todoist' or 'msto-do'
+}
+
+// --- 3. THE MCP HANDSHAKE ---
+// Define the "Standard" tools the AI sees
+mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: [
+    {
+      name: "create_task",
+      description: "Creates a task in your preferred task manager",
+      inputSchema: { /* Standard JSON Schema */ }
+    }
+  ]
+}));
+
+// Start the Local Gateway
+serve({ fetch: app.fetch, port: 8080 });
+console.log("CoreLink Headless Gateway running on http://localhost:8080");
+
+```
+
+---
+
+## 5. Why this is the "Productivity Moat"
+
+1. **Service Portability:** Your `create_task` logic lives in the `server.ts`. If the user toggles a button in your Web UI from "Todoist" to "Google Tasks," the AI agent *doesn't even know*. It just keeps calling `create_task`.
+2. **Web UI Speed:** You can host the Web UI on Vercel/GitHub Pages. When the user opens it, the site simply tries to connect to `http://localhost:8080`. If it connects, the dashboard lights up. **No heavy desktop app to bundle or sign.**
+
+---
+
+## 6. Next Steps for You
+
+1. **Initialize the Repo:** `npm init` or `bun init`.
+2. **Define the Interface:** Write down the 5-10 "Universal" tools (e.g., `send_email`, `search_notes`, `add_to_calendar`).
+3. **Build the first Plugin:** I recommend starting with **Google Tasks** or **Todoist** as they have the easiest OAuth/APIs.
+
+**Would you like me to write the code for the "Policy Middleware"—the function that actually sits between the AI's request and the Gmail API to check your rules?**
+
+
+
+
+To build this effectively, you need to understand how the **MCP (Model Context Protocol)** server lives inside your Node.js/Bun gateway.
+
+In this architecture, CoreLink isn't just a server for your Web UI; it is an **MCP Host** that manages multiple **MCP Servers** (Plugins).
+
+---
+
+## 1. The MCP Integration Strategy
+
+Instead of building one giant MCP server, you will build a **Multiplexer**.
+
+* **The Plugins:** Each is a mini-MCP server (functional logic).
+* **The Gateway:** Acts as the "Shield." It intercepts the Agent's request, checks the policy, and only then forwards the call to the plugin.
+
+---
+
+## 2. Updated Implementation Plan (MCP-Centric)
+
+### **Phase 1: The Core Infrastructure (Weeks 1-2)**
+
+* **Protocol Setup:** Implement the MCP `Stdio` and `HTTP` transports. This allows tools like **Claude Code** to connect via command line and **ChatGPT/Custom Apps** to connect via URL.
+* **The Router:** Build a class that maps incoming MCP `callTool` requests to the correct local plugin.
+
+### **Phase 2: The Abstraction Layer (Weeks 3-5)**
+
+* **Standardized Schemas:** Define the "Universal Tools" (LCH - Least Common Header).
+* *Email:* `corelink_send_email`, `corelink_list_inbox`
+* *Tasks:* `corelink_create_task`, `corelink_get_pending`
+
+
+* **Capability Discovery:** Implement the `listTools` handler that only shows the Agent the tools enabled in the Web UI.
+
+### **Phase 3: The Privacy Middleware (Weeks 6-8)**
+
+* **Interception Logic:** Every MCP request must pass through a `PolicyGuard`.
+* **Redaction Logic:** A post-processing step that cleans the `toolResult` before it is sent back to the Agent.
+
+---
+
+## 3. The Implementation Code (TypeScript)
+
+Here is how you implement the **CoreLink Gateway** using the `@modelcontextprotocol/sdk`.
+
+### `src/gateway/mcp-server.ts`
+
+```typescript
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { 
+  ListToolsRequestSchema, 
+  CallToolRequestSchema,
+  ErrorCode,
+  McpError 
+} from "@modelcontextprotocol/sdk/types.js";
+
+// 1. Initialize the MCP Server
+const mcpServer = new Server(
+  { name: "corelink-gateway", version: "1.0.0" },
+  { capabilities: { tools: {} } }
+);
+
+// 2. Define the "Discovery" Tool
+// This prevents context bloat by only showing the agent what it needs
+mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
+  const activePlugins = await getActivePluginsFromDB(); // From SQLite
+  
+  return {
+    tools: [
+      {
+        name: "discover_capabilities",
+        description: "Search for available workspace apps and their functions.",
+        inputSchema: {
+          type: "object",
+          properties: { query: { type: "string" } }
+        }
+      },
+      // Dynamically include active "Universal" tools
+      ...activePlugins.map(p => p.getStandardTools()).flat()
+    ]
+  };
+});
+
+// 3. The "Policy Guard" Interceptor
+mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+
+  // STEP A: Access Control Policy
+  const isAllowed = await PolicyEngine.check(name, args);
+  if (!isAllowed) {
+    throw new McpError(ErrorCode.InvalidRequest, `Access Denied by CoreLink Policy: ${name}`);
+  }
+
+  try {
+    // STEP B: Service Abstraction
+    // If agent calls 'create_task', we decide if it goes to Todoist or Google
+    const result = await PluginManager.execute(name, args);
+
+    // STEP C: Redaction (Post-processing)
+    const sanitizedResult = await Redactor.clean(result);
+    
+    // STEP D: Logging for Web UI (via WebSocket)
+    WebUIBridge.broadcast('log', { tool: name, status: 'success' });
+
+    return { content: [{ type: "text", text: JSON.stringify(sanitizedResult) }] };
+  } catch (error) {
+    return {
+      content: [{ type: "text", text: `Error: ${error.message}` }],
+      isError: true,
+    };
+  }
+});
+
+// 4. Start the transport (Stdio is best for local agents like Claude Code)
+const transport = new StdioServerTransport();
+await mcpServer.connect(transport);
+
+```
+
+---
+
+## 4. Key MCP Technical Details
+
+### **A. Multi-Transport Support**
+
+Your gateway should support two ways for AI to connect:
+
+1. **Stdio:** Used when you run an agent locally (e.g., `claude dev --mcp-path ./corelink-binary`).
+2. **SSE (Server-Sent Events):** Used for the Web UI or remote agents to talk to your local server over HTTP.
+
+### **B. Context Management (Iterative Discovery)**
+
+When the Agent calls `discover_capabilities`, you return a list of "Potential Tools." You only provide the full JSON definition for `gmail_search` *after* the agent expresses interest. This keeps the prompt clean and the AI focused.
+
+### **C. Error Handling**
+
+Always use `McpError`. This tells the Agent *why* it couldn't access a file (e.g., "Permission Denied" vs. "Tool not found"). This allows the Agent to explain the situation to the user instead of just crashing.
+
+---
+
+## 5. Next Steps
+
+1. **Define your Core Schema:** What fields does `corelink_create_task` definitely need? (e.g., `title`, `body`, `due_date`).
+2. **Plugin boilerplate:** Create a `Plugin` class that all connectors must extend.
+3. **Local API:** Build the Hono.js routes so your Web UI can "Turn on" or "Turn off" specific MCP tools in real-time.
+
+To make this work, the `ICoreLinkPlugin` needs to be more than just a list of functions; it needs to be a **bridge** that handles the metadata (for the AI), the configuration (for the Web UI), and the execution (the API calls).
+
+Here is the TypeScript definition for the Plugin architecture.
+
+---
+
+### 1. The Core Plugin Interface
+
+This interface ensures that whether you are writing a plugin for Gmail, Apple Notes, or a custom local database, the **Gateway** treats them all the same.
+
+```typescript
+// src/types/plugin.ts
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: object; // Standard JSON Schema for the AI
+}
+
+export interface ActionResult {
+  data: any;
+  summary: string; // A short text summary for the Audit Log
+}
+
+export interface ICoreLinkPlugin {
+  // 1. Metadata for the Registry
+  readonly id: string;           // e.g., "com.corelink.todoist"
+  readonly name: string;         // e.g., "Todoist"
+  readonly category: 'email' | 'task' | 'calendar' | 'notes' | 'system';
+
+  // 2. Capabilities (Discovery)
+  // Returns the "Universal" tools (e.g., create_task)
+  getStandardTools(): ToolDefinition[];
+  
+  // Returns provider-specific tools (e.g., set_todoist_priority)
+  getNativeTools?(): ToolDefinition[];
+
+  // 3. Configuration & Auth (For Web UI)
+  // Defines what fields the Web UI needs to show (API Keys, etc.)
+  getConfigSchema(): object; 
+  
+  // 4. Execution Logic
+  // The central dispatcher for the MCP call
+  execute(toolName: string, args: any, context: ExecutionContext): Promise<ActionResult>;
+}
+
+export interface ExecutionContext {
+  auth: any;              // Encrypted tokens passed from the Gateway Vault
+  settings: any;          // User preferences (e.g., "default_list_id")
+  logger: (msg: string) => void; // For real-time updates to the Web UI
+}
+
+```
+
+---
+
+### 2. A Concrete Example: The Todoist Plugin
+
+Here is how you would actually implement a "Task" plugin using this interface.
+
+```typescript
+// src/plugins/todoist/index.ts
+
+import { ICoreLinkPlugin, ToolDefinition, ActionResult } from '../../types/plugin';
+
+export class TodoistPlugin implements ICoreLinkPlugin {
+  readonly id = "com.corelink.todoist";
+  readonly name = "Todoist";
+  readonly category = "task" as const;
+
+  getStandardTools(): ToolDefinition[] {
+    return [{
+      name: "create_task",
+      description: "Create a new task in Todoist",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          due_date: { type: "string" }
+        },
+        required: ["title"]
+      }
+    }];
+  }
+
+  // Example of Service Abstraction (Standardizing the call)
+  async execute(toolName: string, args: any, context: any): Promise<ActionResult> {
+    const { auth } = context;
+
+    if (toolName === "create_task") {
+      // Logic to call Todoist REST API using auth.token
+      // const response = await todoistApi.createTask(args.title, args.due_date);
+      
+      return {
+        data: { id: "123", status: "created" },
+        summary: `Created task: "${args.title}" in Todoist`
+      };
+    }
+    
+    throw new Error(`Tool ${toolName} not found in Todoist plugin`);
+  }
+
+  getConfigSchema() {
+    return {
+      apiKey: { type: "password", label: "Todoist API Token" },
+      defaultList: { type: "text", label: "Default List Name" }
+    };
+  }
+}
+
+```
+
+---
+
+### 3. The Gateway's "Plugin Manager"
+
+The Gateway uses these plugins to satisfy MCP requests. When the AI calls `create_task`, the Gateway does this:
+
+```typescript
+// src/gateway/plugin-manager.ts
+
+class PluginManager {
+  private plugins: Map<string, ICoreLinkPlugin> = new Map();
+
+  // The "Universal Switcher" Logic
+  async executeUniversalAction(category: string, tool: string, args: any) {
+    // 1. Check Web UI settings: Who is the active provider for 'tasks'?
+    const activeProviderId = await db.getSetting(`active_${category}_provider`);
+    const plugin = this.plugins.get(activeProviderId);
+
+    if (!plugin) throw new Error(`No active provider for ${category}`);
+
+    // 2. Get encrypted credentials from Vault
+    const credentials = await Vault.getCredentials(activeProviderId);
+
+    // 3. Execute
+    return plugin.execute(tool, args, { auth: credentials });
+  }
+}
+
+```
+
+---
+
+### 4. Why this is powerful for your Web UI
+
+1. **Dynamic Forms:** Your Web UI can call `plugin.getConfigSchema()` and automatically render the login form for Gmail or Todoist. You don't have to hardcode a UI for every new plugin.
+2. **Audit Logs:** The `summary` field returned by the plugin goes straight to your Web UI’s "Activity Feed," making it easy for the user to see what happened without reading raw JSON.
+3. **Hot-Reloading:** Because it's a standard interface, you can eventually allow users to "Install" a new plugin by just pasting a URL, and the Gateway can download and initialize it instantly.
+
+---
+
+### **Final Implementation Step**
+
+We have the **Interface** and the **MCP Server** structure.
+
+
+The **Policy Engine** is the "Heart of Trust" for CoreLink. Its job is to ensure that even if an Agent is highly capable, it is strictly bound by the user's intent.
+
+To keep it high-performance and "Vegas Rule" compliant, the engine runs entirely locally, using a combination of **Deterministic Rules** (fast) and **Semantic Evaluation** (smart).
+
+---
+
+### 1. The Policy Schema (`policy.yaml`)
+
+This is what the user manages via your Web UI. It is stored locally in SQLite but can be exported as YAML.
+
+```yaml
+# Example User Policy
+version: 1
+global_rules:
+  - id: "block-pii"
+    type: "redaction"
+    enabled: true
+    patterns: ["ssn", "credit_card", "phone_number"]
+
+scopes:
+  - provider: "com.corelink.gmail"
+    rules:
+      - action: "BLOCK"
+        if: "args.query contains 'bank' OR args.sender matches '.*@personal.com'"
+      - action: "REDACT"
+        if: "content contains 'password'"
+      - action: "REQUIRE_APPROVAL"
+        if: "tool == 'send_email'"
+
+  - provider: "com.corelink.apple-notes"
+    rules:
+      - action: "ALLOW"
+        if: "note.tags contains '#work'"
+      - action: "BLOCK"
+        if: "note.tags contains '#private'"
+
+```
+
+---
+
+### 2. The Policy Engine Implementation
+
+We will use a lightweight logic parser (like `json-logic-js` or a simple custom evaluator) to keep it fast.
+
+```typescript
+// src/gateway/policy-engine.ts
+
+export type PolicyAction = 'ALLOW' | 'BLOCK' | 'REDACT' | 'REQUIRE_APPROVAL';
+
+export interface PolicyResult {
+  action: PolicyAction;
+  reason?: string;
+  modifiedArgs?: any; // For "Redact-on-Input"
+}
+
+export class PolicyEngine {
+  // 1. Pre-Execution Guard (Intercepting the Tool Call)
+  static async checkRequest(
+    pluginId: string, 
+    toolName: string, 
+    args: any
+  ): Promise<PolicyResult> {
+    const rules = await this.getRulesForProvider(pluginId);
+
+    for (const rule of rules) {
+      if (this.evaluateCondition(rule.if, { tool: toolName, args })) {
+        return { 
+          action: rule.action, 
+          reason: `Matched rule: ${rule.if}` 
+        };
+      }
+    }
+
+    return { action: 'ALLOW' };
+  }
+
+  // 2. Post-Execution Redactor (Cleaning the Data before AI sees it)
+  static async sanitizeOutput(data: any): Promise<any> {
+    let serialized = JSON.stringify(data);
+
+    // Apply Regex Patterns (PII, Passwords, etc.)
+    const patterns = await this.getEnabledRedactionPatterns();
+    for (const p of patterns) {
+      serialized = serialized.replace(p.regex, "[REDACTED]");
+    }
+
+    return JSON.parse(serialized);
+  }
+
+  private static evaluateCondition(condition: string, context: any): boolean {
+    // In production, use a safe evaluator like 'expr-eval' or 'json-logic'
+    // This prevents arbitrary code execution while allowing complex logic
+    return simpleEval(condition, context);
+  }
+}
+
+```
+
+---
+
+### 3. The "Human-in-the-Loop" Workflow
+
+When the Policy Engine returns `REQUIRE_APPROVAL`, the Gateway pauses the MCP request and hits your Web UI via WebSocket:
+
+1. **Gateway:** `ws.send({ type: 'PENDING_APPROVAL', id: 'req_123', tool: 'send_email', params: {...} })`
+2. **Web UI:** Displays a "Toast" or Modal to the user.
+3. **User:** Clicks **"Approve"** or **"Deny"** (and optionally edits the parameters).
+4. **Gateway:** Resumes the MCP call with the approved data.
+
+---
+
+### 4. Semantic Redaction (The "Pro" Layer)
+
+For the paid/advanced version, you replace simple Regex with a **Local Classifier**.
+
+* **How it works:** Instead of searching for "SSN," you use a tiny local model (like `distilbert-base-uncased`) to classify the *sentiment* or *category* of a text block.
+* **Result:** If the AI retrieves a note that "feels" like a medical record, the Policy Engine triggers a block even if no specific "medical" keywords were in your list.
+
+---
+
+### 5. Why this builds the "Vegas Moat"
+
+1. **Transparency:** Because the code is Open Source, users can see that the `sanitizeOutput` function happens **locally** on their machine before the data is returned to the `CallTool` result.
+2. **Deterministic Control:** Unlike other AI tools that "hope" the AI follows instructions, CoreLink **enforces** it at the code level. If the rule says `BLOCK`, the code physically does not call the API.
+
+---
+
+### **Final Dev Specs Conclusion**
+
+You now have the blueprints for:
+
+1. **The Headless Gateway** (Bun/Hono)
+2. **The MCP Server** (Standardized Agent Interface)
+3. **The Plugin System** (Service Abstraction/LCH)
+4. **The Policy Engine** (Privacy Firewall)
+5. **The Web UI Client** (Management & Visibility)
+
+
+
+
+
+
+The **Audit Log** is the "Black Box" recorder for CoreLink. It serves two purposes: providing **transparency** to the user (verifying that the privacy rules are working) and providing **compliance** for teams (showing exactly what data moved where).
+
+In the hybrid model, the **Full Log** lives locally in SQLite, while only **Metadata/Aggregates** are synced to the Cloud Control Plane.
+
+---
+
+### 1. The Audit Log Schema
+
+The log needs to capture the "Before" and "After" of the Policy Engine's intervention.
+
+```typescript
+// src/types/audit.ts
+
+export interface AuditEntry {
+  id: string;               // UUID
+  timestamp: string;        // ISO8601
+  agentName: string;        // e.g., "Claude Code", "Cursor"
+  
+  // The Request
+  pluginId: string;         // e.g., "com.corelink.gmail"
+  toolName: string;         // e.g., "list_emails"
+  inputArgs: any;           // The arguments the AI sent
+  
+  // The Policy Decision
+  policyDecision: {
+    action: 'ALLOW' | 'BLOCK' | 'REDACT' | 'REQUIRE_APPROVAL';
+    ruleId?: string;        // Which rule triggered this?
+    redactedFields?: string[]; 
+  };
+
+  // The Outcome
+  status: 'success' | 'denied' | 'error';
+  executionTimeMs: number;
+  dataSummary: string;      // Human-readable: "5 emails found, 2 redacted"
+}
+
+```
+
+---
+
+### 2. Implementation: The Local Logger
+
+We use an append-only strategy. To ensure the logs don't consume your entire hard drive, we implement **Automatic Rotation** (e.g., keep 30 days of logs locally).
+
+```typescript
+// src/gateway/audit-logger.ts
+
+import { Database } from "bun:sqlite";
+
+export class AuditLogger {
+  private db: Database;
+
+  constructor() {
+    this.db = new Database("~/.corelink/audit.db");
+    this.init();
+  }
+
+  private init() {
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS logs (
+        id TEXT PRIMARY KEY,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        agent_name TEXT,
+        plugin_id TEXT,
+        tool_name TEXT,
+        decision TEXT,
+        summary TEXT,
+        raw_payload JSON -- Local only, never synced
+      )
+    `);
+  }
+
+  async log(entry: Partial<AuditEntry>) {
+    // 1. Save to Local SQLite
+    this.db.run(
+      "INSERT INTO logs (id, agent_name, plugin_id, tool_name, decision, summary) VALUES (?, ?, ?, ?, ?, ?)",
+      [entry.id, entry.agentName, entry.pluginId, entry.toolName, entry.policyDecision?.action, entry.dataSummary]
+    );
+
+    // 2. Broadcast to Web UI via WebSocket for real-time monitoring
+    WebUIBridge.broadcast('NEW_LOG_ENTRY', entry);
+
+    // 3. (Optional) Sync Metadata to Cloud if Business Tier is active
+    if (CloudClient.isEnrolled()) {
+      CloudClient.syncMetadata({
+        pluginId: entry.pluginId,
+        decision: entry.policyDecision?.action,
+        timestamp: entry.timestamp
+      });
+    }
+  }
+}
+
+```
+
+---
+
+### 3. The "Visual Audit" (Web UI)
+
+The Web UI should provide a "Live Feed" and a "Deep Dive" view.
+
+**Key UI Elements:**
+
+* **The "Traffic Light" System:** Green for `ALLOW`, Yellow for `REDACT/APPROVAL`, Red for `BLOCK`.
+* **The "Diff" Viewer:** A side-by-side view showing the raw data the plugin fetched vs. the redacted data the AI actually received.
+* **The "Why" Hover:** Hovering over a Blocked entry shows the specific rule: *"Rule #4: Block Family Emails"* was triggered.
+
+---
+
+### 4. Why this Audit Log is a Killer Feature
+
+1. **Debugging AI:** When the AI says, "I can't find that email," the user can check the log and see, *"Oh, it's because my CoreLink policy blocked it,"* rather than blaming the AI model.
+2. **Liability Shield:** For agencies or freelancers, the Audit Log acts as a **Proof of Privacy**. You can show a client: *"I used AI to help with your project, but look at my CoreLink logs—none of your sensitive data ever left my machine."*
+3. **Discovery:** By logging `tool_name` and `plugin_id`, you can see which AI agents are the most "talkative" or "aggressive" in trying to access your data.
+
+---
+
+### 5. Final Project Structure (GitHub Ready)
+
+```text
+/corelink
+├── /apps
+│   ├── /web-client       # Next.js Dashboard
+│   └── /gateway          # Headless Bun Server (Open Source)
+├── /packages
+│   ├── /sdk              # ICoreLinkPlugin & Types
+│   ├── /policy-engine    # Logic & Redactor
+│   └── /audit-logger     # SQLite Persistence
+└── /plugins
+    ├── /gmail
+    ├── /todoist
+    └── /apple-notes
+
+```
+
+---
+
+### **Ready to code?**

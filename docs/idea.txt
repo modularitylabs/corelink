@@ -1,0 +1,210 @@
+# CoreLink
+
+## The Secure AI Access Layer for Your Workspace
+
+---
+
+## 1. Vision
+
+CoreLink is a local AI access layer that allows AI agents to safely interact with your digital workspace — without giving them unrestricted access or locking you into a single service provider.
+
+It sits between:
+
+* AI agents (ChatGPT, Claude, local agents)
+* Your workspace (email, calendar, tasks, notes)
+
+CoreLink enforces:
+
+* What AI can read
+* What AI can write
+* Which service provider executes the action
+
+It does not attempt to prevent manual copy/paste misuse.
+It governs structured AI access.
+
+---
+
+## 2. Core Problem
+
+As AI assistants gain deeper integrations, users face two issues:
+
+1. **Unrestricted Access**
+   Connecting AI directly to Gmail or other apps gives broad, opaque access.
+
+2. **Vendor Lock-In**
+   AI workflows become tightly coupled to specific providers (e.g., Gmail vs Outlook).
+
+Users want AI productivity — without losing control or flexibility.
+
+---
+
+## 3. Product Architecture (Hybrid Model)
+
+### A) Local Data Plane (Open Source)
+
+Runs on the user’s machine.
+
+Responsibilities:
+
+* Stores OAuth tokens locally (encrypted)
+* Connects to workspace apps (Gmail, Calendar, etc.)
+* Acts as MCP-compatible gateway for AI agents
+* Proxies structured AI requests
+* Applies access control policies
+* Logs all AI-driven data access and actions
+
+Raw content is processed locally before AI receives it.
+
+The cloud never sees unfiltered workspace data.
+
+---
+
+### B) Cloud Control Plane (Paid – Business Tier)
+
+Optional SaaS layer providing:
+
+* Team policy management
+* Role-based access control
+* Organization-wide rule templates
+* Aggregated metadata dashboards
+* Compliance-friendly audit exports
+* Policy sync across devices
+
+It does not process raw content by default.
+
+---
+
+## 4. Core Features (V1)
+
+### 1️⃣ Access Control (Security)
+
+AI can:
+
+* Access specific folders only
+* Be blocked from certain senders/domains
+* Exclude labeled emails
+* Be limited to specific data scopes
+
+Optional:
+
+* Approval mode for sensitive requests
+* Clear audit log of AI activity
+
+This governs structured AI integrations, not manual user behavior.
+
+---
+
+### 2️⃣ Service Abstraction
+
+AI interacts with generic actions:
+
+* `list_emails()`
+* `send_email()`
+* `create_task()`
+* `create_event()`
+
+CoreLink maps these actions to:
+
+* Gmail or Outlook
+* Todoist or Microsoft To Do
+* Other providers in future
+
+AI workflows are decoupled from specific vendors.
+
+Users can switch providers without rewriting AI logic.
+
+---
+
+## 5. What CoreLink Is NOT
+
+* Not an OS security agent
+* Not a runtime sandbox
+* Not a full prevention system
+* Not a compliance enforcement tool (v1)
+* Not a workflow automation engine
+
+It is an AI access governance layer.
+
+---
+
+## 6. V1 Scope (Disciplined)
+
+Initial focus:
+
+* Gmail connector
+* OpenAI proxy or MCP integration
+* Deterministic rules (folders, senders, labels)
+* Clear audit log
+* Local-first architecture
+
+No:
+
+* Semantic embeddings
+* Complex routing
+* Multi-service orchestration
+* Advanced team governance
+
+---
+
+## 7. V2 Expansion: Routing
+
+Future enhancement:
+
+Smart dispatch rules such as:
+
+* Personal tasks → Todoist
+* Work tasks → Microsoft To Do
+* Client emails → Outlook
+* Internal emails → Gmail
+
+AI remains provider-agnostic.
+CoreLink resolves execution.
+
+---
+
+## 8. Target Users (V1)
+
+* AI-heavy solo founders
+* Consultants and agencies
+* Developers integrating AI with their workspace
+
+Users who:
+
+* Want deeper AI integration
+* Care about controlled access
+* Want portability across services
+
+---
+
+## 9. Core Value Proposition
+
+Without CoreLink:
+
+* AI connects directly to providers.
+* Access scope is broad.
+* No unified policy.
+* Vendor coupling increases.
+* Limited visibility.
+
+With CoreLink:
+
+* AI integrates once.
+* Access is governed locally.
+* Providers are abstracted.
+* Actions are logged.
+* Switching services is easier.
+
+CoreLink makes AI integrations safer and portable.
+
+---
+
+## 10. Strategic Positioning
+
+CoreLink is:
+
+> The local access layer between AI agents and your digital workspace.
+
+It is not about preventing every possible misuse.
+
+It is about governing structured AI access with clarity and control.
+

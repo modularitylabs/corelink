@@ -1,0 +1,27 @@
+{
+  "name": "@corelink/plugin-outlook",
+  "version": "0.1.0",
+  "description": "CoreLink Outlook Plugin",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "tsc --build --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": ["corelink", "plugin", "outlook", "microsoft"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@corelink/core": "*",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
+    "@azure/identity": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0"
+  }
+}
