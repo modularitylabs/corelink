@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
+import type { Account } from '../api/client';
 import {
   getGmailStatus,
   getOutlookStatus,
   startGmailOAuth,
   startOutlookOAuth,
-  disconnectGmail,
-  disconnectOutlook,
 } from '../api/client';
+import { AccountCard } from '../components/AccountCard';
 
 export function DashboardPage() {
-  const [gmailConnected, setGmailConnected] = useState(false);
-  const [outlookConnected, setOutlookConnected] = useState(false);
+  const [gmailAccounts, setGmailAccounts] = useState<Account[]>([]);
+  const [outlookAccounts, setOutlookAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -25,8 +25,8 @@ export function DashboardPage() {
         getOutlookStatus(),
       ]);
 
-      setGmailConnected(gmailData.connected);
-      setOutlookConnected(outlookData.connected);
+      setGmailAccounts(gmailData.accounts || []);
+      setOutlookAccounts(outlookData.accounts || []);
     } catch (error) {
       toast.error('Failed to check connection status');
       console.error('Failed to check connection status:', error);
@@ -42,12 +42,13 @@ export function DashboardPage() {
       if (data.authUrl) {
         window.open(data.authUrl, '_blank', 'width=600,height=700');
 
+        const initialCount = gmailAccounts.length;
         const interval = setInterval(async () => {
           const statusData = await getGmailStatus();
-          if (statusData.connected) {
-            setGmailConnected(true);
+          if (statusData.accounts && statusData.accounts.length > initialCount) {
+            setGmailAccounts(statusData.accounts);
             clearInterval(interval);
-            toast.success('Gmail connected successfully');
+            toast.success('Gmail account connected successfully');
           }
         }, 2000);
 
@@ -61,17 +62,6 @@ export function DashboardPage() {
     }
   }
 
-  async function handleDisconnectGmail() {
-    try {
-      await disconnectGmail();
-      setGmailConnected(false);
-      toast.success('Gmail disconnected');
-    } catch (error) {
-      toast.error('Failed to disconnect Gmail');
-      console.error('Failed to disconnect Gmail:', error);
-    }
-  }
-
   async function handleConnectOutlook() {
     try {
       const data = await startOutlookOAuth();
@@ -79,12 +69,13 @@ export function DashboardPage() {
       if (data.authUrl) {
         window.open(data.authUrl, '_blank', 'width=600,height=700');
 
+        const initialCount = outlookAccounts.length;
         const interval = setInterval(async () => {
           const statusData = await getOutlookStatus();
-          if (statusData.connected) {
-            setOutlookConnected(true);
+          if (statusData.accounts && statusData.accounts.length > initialCount) {
+            setOutlookAccounts(statusData.accounts);
             clearInterval(interval);
-            toast.success('Outlook connected successfully');
+            toast.success('Outlook account connected successfully');
           }
         }, 2000);
 
@@ -95,17 +86,6 @@ export function DashboardPage() {
     } catch (error) {
       toast.error('Failed to connect Outlook');
       console.error('Failed to start Outlook OAuth:', error);
-    }
-  }
-
-  async function handleDisconnectOutlook() {
-    try {
-      await disconnectOutlook();
-      setOutlookConnected(false);
-      toast.success('Outlook disconnected');
-    } catch (error) {
-      toast.error('Failed to disconnect Outlook');
-      console.error('Failed to disconnect Outlook:', error);
     }
   }
 
@@ -126,95 +106,71 @@ export function DashboardPage() {
         </p>
       </div>
 
-      <div className="space-y-4">
-        {/* Gmail Card */}
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
+      <div className="space-y-6">
+        {/* Gmail Section */}
+        <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center text-2xl">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center text-2xl">
                 📧
               </div>
               <div>
                 <h3 className="font-semibold text-gray-900">Gmail</h3>
-                <p className="text-sm text-gray-500">
-                  {gmailConnected ? 'Connected' : 'Not connected'}
+                <p className="text-xs text-gray-500">
+                  {gmailAccounts.length > 0
+                    ? `${gmailAccounts.length} account${gmailAccounts.length > 1 ? 's' : ''} connected`
+                    : 'Not connected'}
                 </p>
               </div>
             </div>
-
-            {gmailConnected ? (
-              <div className="flex items-center gap-3">
-                <span className="flex items-center gap-2 text-green-600 text-sm font-medium">
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fillRule="evenodd"
-                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  Active
-                </span>
-                <button
-                  onClick={handleDisconnectGmail}
-                  className="px-4 py-2 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition"
-                >
-                  Disconnect
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={handleConnectGmail}
-                className="px-6 py-2 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition shadow-sm"
-              >
-                Connect Gmail
-              </button>
-            )}
+            <button
+              onClick={handleConnectGmail}
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition shadow-sm"
+            >
+              {gmailAccounts.length > 0 ? 'Add Another Account' : 'Connect Gmail'}
+            </button>
           </div>
+
+          {gmailAccounts.length > 0 && (
+            <div className="space-y-2">
+              {gmailAccounts.map((account) => (
+                <AccountCard key={account.id} account={account} onUpdate={checkStatus} />
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Outlook Card */}
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
+        {/* Outlook Section */}
+        <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center text-2xl">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-2xl">
                 📨
               </div>
               <div>
                 <h3 className="font-semibold text-gray-900">Outlook</h3>
-                <p className="text-sm text-gray-500">
-                  {outlookConnected ? 'Connected' : 'Not connected'}
+                <p className="text-xs text-gray-500">
+                  {outlookAccounts.length > 0
+                    ? `${outlookAccounts.length} account${outlookAccounts.length > 1 ? 's' : ''} connected`
+                    : 'Not connected'}
                 </p>
               </div>
             </div>
-
-            {outlookConnected ? (
-              <div className="flex items-center gap-3">
-                <span className="flex items-center gap-2 text-green-600 text-sm font-medium">
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fillRule="evenodd"
-                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  Active
-                </span>
-                <button
-                  onClick={handleDisconnectOutlook}
-                  className="px-4 py-2 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition"
-                >
-                  Disconnect
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={handleConnectOutlook}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition shadow-sm"
-              >
-                Connect Outlook
-              </button>
-            )}
+            <button
+              onClick={handleConnectOutlook}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition shadow-sm"
+            >
+              {outlookAccounts.length > 0 ? 'Add Another Account' : 'Connect Outlook'}
+            </button>
           </div>
+
+          {outlookAccounts.length > 0 && (
+            <div className="space-y-2">
+              {outlookAccounts.map((account) => (
+                <AccountCard key={account.id} account={account} onUpdate={checkStatus} />
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Todoist Card (Coming Soon) */}
@@ -250,8 +206,9 @@ export function DashboardPage() {
         </ol>
         <div className="mt-4 pt-4 border-t border-purple-200">
           <p className="text-sm text-purple-700">
-            <strong>Service Abstraction:</strong> Both Gmail and Outlook implement the same
-            standard email tools. AI agents can switch between providers seamlessly!
+            <strong>Multi-Account Support:</strong> You can connect multiple Gmail or Outlook
+            accounts (e.g., work@gmail.com + personal@gmail.com). AI agents can access all
+            connected accounts based on your policies!
           </p>
         </div>
       </div>

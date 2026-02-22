@@ -115,6 +115,7 @@ export class CoreLinkMCPServer {
           const executionTime = Date.now() - startTime;
           await auditLogger.log({
             agentName: 'Claude Code',
+            category: plugin.category,
             pluginId: plugin.id,
             toolName,
             inputArgs: args as Record<string, unknown>,
@@ -144,6 +145,7 @@ export class CoreLinkMCPServer {
           const executionTime = Date.now() - startTime;
           await auditLogger.log({
             agentName: 'Claude Code',
+            category: plugin.category,
             pluginId: plugin.id,
             toolName,
             inputArgs: args as Record<string, unknown>,
@@ -202,6 +204,7 @@ export class CoreLinkMCPServer {
         // Log successful execution
         await auditLogger.log({
           agentName: 'Claude Code',
+          category: plugin.category,
           pluginId: plugin.id,
           toolName,
           inputArgs: args as Record<string, unknown>,
@@ -238,6 +241,7 @@ export class CoreLinkMCPServer {
           if (plugin) {
             await auditLogger.log({
               agentName: 'Claude Code',
+              category: plugin.category,
               pluginId: plugin.id,
               toolName,
               inputArgs: args as Record<string, unknown>,

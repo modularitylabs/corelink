@@ -52,8 +52,8 @@ export class PolicyEngine {
    * @returns Policy decision with action and metadata
    */
   async evaluate(context: PolicyEvaluationContext): Promise<ExtendedPolicyResult> {
-    // Load applicable rules (global + plugin-specific)
-    const rules = await this.loadRules(context.plugin);
+    // Load applicable rules (global + category-specific + plugin-specific)
+    const rules = await this.loadRules(context.plugin, context.category);
 
     // Sort by priority (higher priority first)
     const sortedRules = rules.sort((a, b) => (b.priority || 0) - (a.priority || 0));
@@ -106,9 +106,12 @@ export class PolicyEngine {
   /**
    * Load policy rules for evaluation
    *
-   * Loads both global rules (pluginId = null) and plugin-specific rules
+   * Loads rules in hierarchical order:
+   * 1. Global rules (category = null, pluginId = null)
+   * 2. Category-specific rules (category matches, pluginId = null)
+   * 3. Plugin-specific rules (pluginId matches)
    */
-  async loadRules(pluginId: string): Promise<Array<{
+  async loadRules(pluginId: string, category?: string): Promise<Array<{
     id: string;
     action: string;
     condition: string;
@@ -121,8 +124,12 @@ export class PolicyEngine {
       .from(policyRules)
       .where(
         or(
-          isNull(policyRules.pluginId), // Global rules
-          eq(policyRules.pluginId, pluginId) // Plugin-specific rules
+          // Global rules (apply to all categories and plugins)
+          isNull(policyRules.category),
+          // Category-specific rules (apply to all plugins in this category)
+          category ? eq(policyRules.category, category) : undefined,
+          // Plugin-specific rules (highest specificity)
+          eq(policyRules.pluginId, pluginId)
         )
       )
       .orderBy(desc(policyRules.priority));

@@ -8,9 +8,23 @@ const API_URL = 'http://localhost:3000';
 
 export type PolicyAction = 'ALLOW' | 'BLOCK' | 'REDACT' | 'REQUIRE_APPROVAL';
 
+export type PolicyCategory = 'email' | 'calendar' | 'task' | 'file' | 'global';
+
+export interface Account {
+  id: string;
+  pluginId: string;
+  email: string;
+  displayName?: string;
+  isPrimary: boolean;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Policy {
   id: string;
   pluginId?: string | null;
+  category?: string | null;
   action: PolicyAction;
   condition: Record<string, any>;
   description?: string;
@@ -47,6 +61,7 @@ export interface AuditLog {
   id: string;
   timestamp: string;
   pluginId: string;
+  category?: string;
   agentName: string;
   tool: string;
   args: Record<string, any>;
@@ -86,6 +101,7 @@ export async function getPolicy(id: string): Promise<Policy> {
 
 export async function createPolicy(policy: {
   pluginId?: string | null;
+  category?: string | null;
   action: PolicyAction;
   condition: Record<string, any>;
   description?: string;
@@ -108,6 +124,7 @@ export async function updatePolicy(
   id: string,
   updates: {
     pluginId?: string | null;
+    category?: string | null;
     action?: PolicyAction;
     condition?: Record<string, any>;
     description?: string;
@@ -231,6 +248,7 @@ export async function getAuditLogs(filters?: {
   startDate?: string;
   endDate?: string;
   pluginId?: string;
+  category?: string;
   agentName?: string;
   status?: 'success' | 'denied' | 'error';
   action?: PolicyAction;
@@ -277,15 +295,67 @@ export async function getRecentActivity(limit = 20): Promise<AuditLog[]> {
   return response.json();
 }
 
+// ===== Account Management API =====
+
+export async function getAccounts(pluginId?: string): Promise<Account[]> {
+  const url = pluginId
+    ? `${API_URL}/api/accounts?pluginId=${pluginId}`
+    : `${API_URL}/api/accounts`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Failed to fetch accounts');
+  return response.json();
+}
+
+export async function getAccount(accountId: string): Promise<Account> {
+  const response = await fetch(`${API_URL}/api/accounts/${accountId}`);
+  if (!response.ok) throw new Error('Failed to fetch account');
+  return response.json();
+}
+
+export async function getPrimaryAccount(pluginId: string): Promise<Account | null> {
+  const response = await fetch(`${API_URL}/api/accounts/primary?pluginId=${pluginId}`);
+  if (!response.ok) throw new Error('Failed to fetch primary account');
+  return response.json();
+}
+
+export async function setPrimaryAccount(accountId: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/accounts/${accountId}/set-primary`, {
+    method: 'POST',
+  });
+  if (!response.ok) throw new Error('Failed to set primary account');
+}
+
+export async function updateAccount(
+  accountId: string,
+  updates: {
+    displayName?: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<void> {
+  const response = await fetch(`${API_URL}/api/accounts/${accountId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!response.ok) throw new Error('Failed to update account');
+}
+
+export async function deleteAccount(accountId: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/accounts/${accountId}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) throw new Error('Failed to delete account');
+}
+
 // ===== OAuth API =====
 
-export async function getGmailStatus(): Promise<{ connected: boolean }> {
+export async function getGmailStatus(): Promise<{ accounts: Account[] }> {
   const response = await fetch(`${API_URL}/oauth/gmail/status`);
   if (!response.ok) throw new Error('Failed to fetch Gmail status');
   return response.json();
 }
 
-export async function getOutlookStatus(): Promise<{ connected: boolean }> {
+export async function getOutlookStatus(): Promise<{ accounts: Account[] }> {
   const response = await fetch(`${API_URL}/oauth/outlook/status`);
   if (!response.ok) throw new Error('Failed to fetch Outlook status');
   return response.json();

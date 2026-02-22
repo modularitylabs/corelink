@@ -9,109 +9,98 @@ import { db } from './index.js';
 import { policyRules, redactionPatterns } from './schema.js';
 
 /**
- * Default policy rules
+ * Default policy rules - organized by category
  */
 const defaultPolicies = [
+  // ===================
+  // EMAIL CATEGORY POLICIES
+  // ===================
+
   // High priority: Block all send_email operations by default
   {
-    id: 'pol-block-send-email',
-    pluginId: null, // Global rule
+    id: 'pol-email-block-send',
+    category: 'email', // Email category-specific
+    pluginId: null,
     action: 'BLOCK',
     condition: JSON.stringify({
       '==': [{ var: 'tool' }, 'send_email'],
     }),
-    description: 'Block all email sending operations for safety',
+    description: 'Email: Block all email sending operations for safety',
     priority: 200,
     enabled: true,
   },
 
   // Medium priority: Require approval for high-volume email reads
   {
-    id: 'pol-approve-high-volume',
+    id: 'pol-email-approve-high-volume',
+    category: 'email',
     pluginId: null,
     action: 'REQUIRE_APPROVAL',
     condition: JSON.stringify({
-      and: [
-        { '==': [{ var: 'tool' }, 'list_emails'] },
-        { '>': [{ var: 'args.max_results' }, 100] },
-      ],
+      '>': [{ var: 'args.max_results' }, 100],
     }),
-    description: 'Require approval when requesting more than 100 emails',
+    description: 'Email: Require approval when requesting more than 100 emails',
     priority: 150,
     enabled: true,
   },
 
   // Medium priority: Redact email body content
   {
-    id: 'pol-redact-email-body',
+    id: 'pol-email-redact-body',
+    category: 'email',
     pluginId: null,
     action: 'REDACT',
     condition: JSON.stringify({
       '==': [{ var: 'tool' }, 'read_email'],
     }),
-    description: 'Redact sensitive information from email body content',
+    description: 'Email: Redact sensitive information from email body content',
     priority: 100,
     enabled: true,
   },
 
-  // Low priority: Allow list_emails with reasonable limits (≤10)
+  // Low priority: Allow listing up to 50 emails (reasonable default)
   {
-    id: 'pol-allow-list-10',
+    id: 'pol-email-allow-list-50',
+    category: 'email',
     pluginId: null,
     action: 'ALLOW',
     condition: JSON.stringify({
-      and: [
-        { '==': [{ var: 'tool' }, 'list_emails'] },
-        { '<=': [{ var: 'args.max_results' }, 10] },
-      ],
+      '<=': [{ var: 'args.max_results' }, 50],
     }),
-    description: 'Allow listing up to 10 emails',
+    description: 'Email: Allow listing up to 50 emails',
     priority: 50,
     enabled: true,
   },
 
-  // Low priority: Allow list_emails with moderate limits (≤50)
+  // Low priority: Allow email search operations
   {
-    id: 'pol-allow-list-50',
-    pluginId: null,
-    action: 'ALLOW',
-    condition: JSON.stringify({
-      and: [
-        { '==': [{ var: 'tool' }, 'list_emails'] },
-        { '<=': [{ var: 'args.max_results' }, 50] },
-      ],
-    }),
-    description: 'Allow listing up to 50 emails',
-    priority: 40,
-    enabled: true,
-  },
-
-  // Low priority: Allow list_emails with high limits (≤100)
-  {
-    id: 'pol-allow-list-100',
-    pluginId: null,
-    action: 'ALLOW',
-    condition: JSON.stringify({
-      and: [
-        { '==': [{ var: 'tool' }, 'list_emails'] },
-        { '<=': [{ var: 'args.max_results' }, 100] },
-      ],
-    }),
-    description: 'Allow listing up to 100 emails',
-    priority: 30,
-    enabled: true,
-  },
-
-  // Low priority: Allow search_emails
-  {
-    id: 'pol-allow-search',
+    id: 'pol-email-allow-search',
+    category: 'email',
     pluginId: null,
     action: 'ALLOW',
     condition: JSON.stringify({
       '==': [{ var: 'tool' }, 'search_emails'],
     }),
-    description: 'Allow email search operations',
-    priority: 20,
+    description: 'Email: Allow email search operations',
+    priority: 40,
+    enabled: true,
+  },
+
+  // ===================
+  // GLOBAL POLICIES (apply to all categories)
+  // ===================
+
+  // Block any tool with "delete" in the name (safety measure)
+  {
+    id: 'pol-global-block-delete',
+    category: null, // Global - applies to all categories
+    pluginId: null,
+    action: 'BLOCK',
+    condition: JSON.stringify({
+      in: ['delete', { var: 'tool' }],
+    }),
+    description: 'Global: Block all deletion operations for safety',
+    priority: 300,
     enabled: true,
   },
 ];

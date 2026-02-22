@@ -103,8 +103,33 @@ export async function oauthRoutes(
         codeVerifier,
       });
 
-      // Store credentials (no client secret stored!)
-      await credentialManager.storeCredentials('com.corelink.gmail', 'oauth2', {
+      // Set credentials to fetch user info
+      oauth2Client.setCredentials(tokens);
+
+      // Fetch user email from Google API
+      const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+      const userInfo = await oauth2.userinfo.get();
+      const email = userInfo.data.email;
+      const displayName = userInfo.data.name;
+
+      if (!email) {
+        return reply.code(500).send({ error: 'Could not retrieve user email from Google' });
+      }
+
+      // Create account record
+      const accountId = await credentialManager.createAccount(
+        'com.corelink.gmail',
+        email,
+        displayName || undefined,
+        {
+          // Store OAuth config in account metadata
+          clientId: GOOGLE_CLIENT_ID,
+          redirectUri,
+        }
+      );
+
+      // Store credentials linked to account
+      await credentialManager.storeAccountCredentials(accountId, 'oauth2', {
         clientId: GOOGLE_CLIENT_ID,
         redirectUri,
         accessToken: tokens.access_token,
@@ -188,10 +213,18 @@ export async function oauthRoutes(
 
   /**
    * Check Gmail connection status
+   * Returns list of connected Gmail accounts
    */
   fastify.get('/oauth/gmail/status', async (_request, reply) => {
-    const hasCredentials = await credentialManager.hasCredentials('com.corelink.gmail');
-    return reply.send({ connected: hasCredentials });
+    try {
+      const accounts = await credentialManager.listAccounts('com.corelink.gmail');
+      return reply.send({ accounts });
+    } catch (error) {
+      fastify.log.error(error, '[Gmail Status]');
+      // Fallback to legacy check if accounts table doesn't exist yet
+      const hasCredentials = await credentialManager.hasCredentials('com.corelink.gmail');
+      return reply.send({ connected: hasCredentials, accounts: [] });
+    }
   });
 
   /**

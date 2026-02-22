@@ -29,6 +29,7 @@ import { CredentialManager } from './services/credential-manager.js';
 import { oauthRoutes } from './routes/oauth.js';
 import { outlookOAuthRoutes } from './routes/outlook-oauth.js';
 import { policyRoutes } from './routes/policies.js';
+import { accountRoutes } from './routes/accounts.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { PluginRegistry } from './mcp/plugin-registry.js';
 import { MCPSessionManager } from './mcp/http-handler.js';
@@ -296,6 +297,11 @@ async function start() {
   fastify.register(async (instance) => {
     await oauthRoutes(instance, credentialManager);
     await outlookOAuthRoutes(instance, credentialManager);
+  });
+
+  // Register account management routes
+  fastify.register(async (instance) => {
+    await accountRoutes(instance, credentialManager);
   });
 
   // Register policy management routes

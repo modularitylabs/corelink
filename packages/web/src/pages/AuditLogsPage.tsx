@@ -8,6 +8,7 @@ import {
   type PolicyAction,
 } from '../api/client';
 import { PolicyBadge } from '../components/PolicyBadge';
+import { CategoryBadge } from '../components/CategoryBadge';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 
 export function AuditLogsPage() {
@@ -19,18 +20,20 @@ export function AuditLogsPage() {
   // Filters
   const [statusFilter, setStatusFilter] = useState<'all' | 'success' | 'denied' | 'error'>('all');
   const [actionFilter, setActionFilter] = useState<PolicyAction | 'all'>('all');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [pluginFilter, setPluginFilter] = useState('');
   const [agentFilter, setAgentFilter] = useState('');
 
   useEffect(() => {
     loadData();
-  }, [statusFilter, actionFilter, pluginFilter, agentFilter]);
+  }, [statusFilter, actionFilter, categoryFilter, pluginFilter, agentFilter]);
 
   async function loadData() {
     try {
       const filters: any = { limit: 100 };
       if (statusFilter !== 'all') filters.status = statusFilter;
       if (actionFilter !== 'all') filters.action = actionFilter;
+      if (categoryFilter) filters.category = categoryFilter;
       if (pluginFilter) filters.pluginId = pluginFilter;
       if (agentFilter) filters.agentName = agentFilter;
 
@@ -116,7 +119,22 @@ export function AuditLogsPage() {
 
       {/* Filters */}
       <div className="bg-white rounded-lg shadow p-4">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500 text-sm"
+            >
+              <option value="">All Categories</option>
+              <option value="email">📧 Email</option>
+              <option value="calendar">📅 Calendar</option>
+              <option value="task">✓ Task</option>
+              <option value="file">📁 File</option>
+            </select>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
             <select
@@ -169,12 +187,13 @@ export function AuditLogsPage() {
           </div>
         </div>
 
-        {(statusFilter !== 'all' || actionFilter !== 'all' || pluginFilter || agentFilter) && (
+        {(statusFilter !== 'all' || actionFilter !== 'all' || categoryFilter || pluginFilter || agentFilter) && (
           <div className="mt-3">
             <button
               onClick={() => {
                 setStatusFilter('all');
                 setActionFilter('all');
+                setCategoryFilter('');
                 setPluginFilter('');
                 setAgentFilter('');
               }}
@@ -196,13 +215,13 @@ export function AuditLogsPage() {
                   Timestamp
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Category
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Tool
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Agent
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Plugin
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Action
@@ -221,14 +240,18 @@ export function AuditLogsPage() {
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {new Date(log.timestamp).toLocaleString()}
                   </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {log.category ? (
+                      <CategoryBadge category={log.category} />
+                    ) : (
+                      <span className="text-xs text-gray-400">-</span>
+                    )}
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                     {log.tool}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {log.agentName}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    <code className="text-xs bg-gray-100 px-2 py-1 rounded">{log.pluginId}</code>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <PolicyBadge action={log.policyDecision.action} />

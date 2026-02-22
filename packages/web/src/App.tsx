@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, NavLink } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { DashboardPage } from './pages/DashboardPage';
+import { AccountsPage } from './pages/AccountsPage';
 import { PoliciesPage } from './pages/PoliciesPage';
 import { RedactionPage } from './pages/RedactionPage';
 import { ApprovalsPage } from './pages/ApprovalsPage';
@@ -27,6 +28,7 @@ function App() {
               {/* Navigation */}
               <nav className="flex gap-1">
                 <NavItem to="/" label="Dashboard" />
+                <NavItem to="/accounts" label="Accounts" />
                 <NavItem to="/policies" label="Policies" />
                 <NavItem to="/redaction" label="Redaction" />
                 <NavItem to="/approvals" label="Approvals" />
@@ -40,6 +42,7 @@ function App() {
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <Routes>
             <Route path="/" element={<DashboardPage />} />
+            <Route path="/accounts" element={<AccountsPage />} />
             <Route path="/policies" element={<PoliciesPage />} />
             <Route path="/redaction" element={<RedactionPage />} />
             <Route path="/approvals" element={<ApprovalsPage />} />

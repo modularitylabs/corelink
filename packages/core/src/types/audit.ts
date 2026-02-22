@@ -59,6 +59,7 @@ export interface AuditStats {
 export interface AuditQuery {
   startDate?: string;
   endDate?: string;
+  category?: string; // 'email' | 'task' | 'calendar' | 'notes' | etc.
   pluginId?: string;
   agentName?: string;
   status?: AuditEntry['status'];

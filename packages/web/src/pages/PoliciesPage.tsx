@@ -9,6 +9,7 @@ import {
   type PolicyAction,
 } from '../api/client';
 import { PolicyBadge } from '../components/PolicyBadge';
+import { CategoryBadge } from '../components/CategoryBadge';
 import { StatusToggle } from '../components/StatusToggle';
 import { JSONEditor } from '../components/JSONEditor';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -96,6 +97,9 @@ export function PoliciesPage() {
                 Status
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Category
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Action
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -103,9 +107,6 @@ export function PoliciesPage() {
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Priority
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Plugin
               </th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Actions
@@ -119,6 +120,13 @@ export function PoliciesPage() {
                   <StatusToggle enabled={policy.enabled} onChange={() => handleToggle(policy)} />
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
+                  {policy.category ? (
+                    <CategoryBadge category={policy.category} />
+                  ) : (
+                    <span className="text-xs text-gray-400">-</span>
+                  )}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
                   <PolicyBadge action={policy.action} />
                 </td>
                 <td className="px-6 py-4">
@@ -129,9 +137,6 @@ export function PoliciesPage() {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                   {policy.priority}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {policy.pluginId || 'All'}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                   <button
@@ -204,10 +209,10 @@ interface PolicyFormModalProps {
 
 function PolicyFormModal({ policy, onClose, onSave }: PolicyFormModalProps) {
   const [action, setAction] = useState<PolicyAction>(policy?.action || 'ALLOW');
+  const [category, setCategory] = useState(policy?.category || '');
   const [condition, setCondition] = useState<Record<string, any>>(policy?.condition || { '==': [{ var: 'tool' }, 'example'] });
   const [description, setDescription] = useState(policy?.description || '');
   const [priority, setPriority] = useState(policy?.priority || 100);
-  const [pluginId, setPluginId] = useState(policy?.pluginId || '');
   const [enabled, setEnabled] = useState(policy?.enabled !== undefined ? policy.enabled : true);
   const [saving, setSaving] = useState(false);
 
@@ -219,21 +224,21 @@ function PolicyFormModal({ policy, onClose, onSave }: PolicyFormModalProps) {
       if (policy) {
         await updatePolicy(policy.id, {
           action,
+          category: category || null,
           condition,
           description,
           priority,
-          pluginId: pluginId || null,
           enabled,
         });
         toast.success('Policy updated');
-        onSave({ ...policy, action, condition, description, priority, pluginId, enabled });
+        onSave({ ...policy, action, category, condition, description, priority, enabled });
       } else {
         const newPolicy = await createPolicy({
           action,
+          category: category || null,
           condition,
           description,
           priority,
-          pluginId: pluginId || null,
           enabled,
         });
         toast.success('Policy created');
@@ -260,19 +265,36 @@ function PolicyFormModal({ policy, onClose, onSave }: PolicyFormModalProps) {
               </h3>
 
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Action</label>
-                  <select
-                    value={action}
-                    onChange={(e) => setAction(e.target.value as PolicyAction)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
-                    required
-                  >
-                    <option value="ALLOW">ALLOW</option>
-                    <option value="BLOCK">BLOCK</option>
-                    <option value="REDACT">REDACT</option>
-                    <option value="REQUIRE_APPROVAL">REQUIRE_APPROVAL</option>
-                  </select>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Category</label>
+                    <select
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                    >
+                      <option value="">None (Global)</option>
+                      <option value="email">📧 Email</option>
+                      <option value="calendar">📅 Calendar</option>
+                      <option value="task">✓ Task</option>
+                      <option value="file">📁 File</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Action</label>
+                    <select
+                      value={action}
+                      onChange={(e) => setAction(e.target.value as PolicyAction)}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                      required
+                    >
+                      <option value="ALLOW">ALLOW</option>
+                      <option value="BLOCK">BLOCK</option>
+                      <option value="REDACT">REDACT</option>
+                      <option value="REQUIRE_APPROVAL">REQUIRE_APPROVAL</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div>
@@ -286,33 +308,18 @@ function PolicyFormModal({ policy, onClose, onSave }: PolicyFormModalProps) {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Priority</label>
-                    <input
-                      type="number"
-                      value={priority}
-                      onChange={(e) => setPriority(parseInt(e.target.value, 10))}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
-                      min="0"
-                      max="999"
-                      required
-                    />
-                    <p className="mt-1 text-xs text-gray-500">Higher = evaluated first</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">
-                      Plugin ID (optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={pluginId}
-                      onChange={(e) => setPluginId(e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
-                      placeholder="com.corelink.gmail"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Priority</label>
+                  <input
+                    type="number"
+                    value={priority}
+                    onChange={(e) => setPriority(parseInt(e.target.value, 10))}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                    min="0"
+                    max="999"
+                    required
+                  />
+                  <p className="mt-1 text-xs text-gray-500">Higher = evaluated first</p>
                 </div>
 
                 <div>

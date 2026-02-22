@@ -135,8 +135,44 @@ export async function outlookOAuthRoutes(
         expires_in: number;
       };
 
-      // Store credentials (no client secret stored!)
-      await credentialManager.storeCredentials('com.corelink.outlook', 'oauth2', {
+      // Fetch user email from Microsoft Graph API
+      const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
+        headers: {
+          Authorization: `Bearer ${tokens.access_token}`,
+        },
+      });
+
+      if (!graphResponse.ok) {
+        throw new Error('Failed to fetch user info from Microsoft Graph');
+      }
+
+      const userInfo = (await graphResponse.json()) as {
+        mail?: string;
+        userPrincipalName?: string;
+        displayName?: string;
+      };
+
+      const email = userInfo.mail || userInfo.userPrincipalName;
+      const displayName = userInfo.displayName;
+
+      if (!email) {
+        return reply.code(500).send({ error: 'Could not retrieve user email from Microsoft' });
+      }
+
+      // Create account record
+      const accountId = await credentialManager.createAccount(
+        'com.corelink.outlook',
+        email,
+        displayName || undefined,
+        {
+          // Store OAuth config in account metadata
+          clientId: MICROSOFT_CLIENT_ID,
+          redirectUri,
+        }
+      );
+
+      // Store credentials linked to account
+      await credentialManager.storeAccountCredentials(accountId, 'oauth2', {
         clientId: MICROSOFT_CLIENT_ID,
         redirectUri,
         accessToken: tokens.access_token,
@@ -220,10 +256,18 @@ export async function outlookOAuthRoutes(
 
   /**
    * Check Outlook connection status
+   * Returns list of connected Outlook accounts
    */
   fastify.get('/oauth/outlook/status', async (_request, reply) => {
-    const hasCredentials = await credentialManager.hasCredentials('com.corelink.outlook');
-    return reply.send({ connected: hasCredentials });
+    try {
+      const accounts = await credentialManager.listAccounts('com.corelink.outlook');
+      return reply.send({ accounts });
+    } catch (error) {
+      fastify.log.error(error, '[Outlook Status]');
+      // Fallback to legacy check if accounts table doesn't exist yet
+      const hasCredentials = await credentialManager.hasCredentials('com.corelink.outlook');
+      return reply.send({ connected: hasCredentials, accounts: [] });
+    }
   });
 
   /**

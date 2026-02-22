@@ -8,12 +8,33 @@ import { sql } from 'drizzle-orm';
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**
+ * Accounts (multi-account support)
+ * Maps email addresses to plugins for multi-account scenarios
+ */
+export const accounts = sqliteTable('accounts', {
+  id: text('id').primaryKey(), // UUID
+  pluginId: text('plugin_id').notNull(), // Foreign key to plugin
+  email: text('email').notNull(), // Account identifier (e.g., "work@gmail.com")
+  displayName: text('display_name'), // Optional friendly name
+  isPrimary: integer('is_primary', { mode: 'boolean' }).notNull().default(false),
+  metadata: text('metadata'), // JSON blob for provider-specific data
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at')
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+});
+
+/**
  * Plugin credentials (OAuth tokens, API keys, etc.)
  * Encrypted at rest using Node.js crypto
+ * Now associated with specific accounts for multi-account support
  */
 export const credentials = sqliteTable('credentials', {
   id: text('id').primaryKey(),
-  pluginId: text('plugin_id').notNull(),
+  accountId: text('account_id'), // Foreign key to accounts.id (nullable for migration compatibility)
+  pluginId: text('plugin_id').notNull(), // Kept for backward compatibility during migration
   type: text('type').notNull(), // 'oauth2' | 'api_key' | 'basic'
   encryptedData: text('encrypted_data').notNull(), // JSON blob, encrypted
   createdAt: text('created_at')
@@ -41,7 +62,8 @@ export const pluginSettings = sqliteTable('plugin_settings', {
  */
 export const policyRules = sqliteTable('policy_rules', {
   id: text('id').primaryKey(),
-  pluginId: text('plugin_id'), // null = global rule
+  category: text('category'), // null = global, 'email' | 'task' | 'calendar' | 'notes' | 'storage' | 'system'
+  pluginId: text('plugin_id'), // null = category-level rule, non-null = plugin-specific override
   action: text('action').notNull(), // 'ALLOW' | 'BLOCK' | 'REDACT' | 'REQUIRE_APPROVAL'
   condition: text('condition').notNull(), // JSON Logic expression
   description: text('description'),
@@ -82,6 +104,7 @@ export const auditLogs = sqliteTable('audit_logs', {
   agentVersion: text('agent_version'),
 
   // Request
+  category: text('category'), // 'email' | 'task' | 'calendar' | 'notes' | 'storage' | 'system'
   pluginId: text('plugin_id').notNull(),
   toolName: text('tool_name').notNull(),
   inputArgs: text('input_args').notNull(), // JSON blob

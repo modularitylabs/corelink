@@ -18,6 +18,7 @@ import type { PolicyAction } from '@corelink/core';
 export interface CreateAuditLogParams {
   agentName: string;
   agentVersion?: string;
+  category?: string; // 'email' | 'task' | 'calendar' | etc.
   pluginId: string;
   toolName: string;
   inputArgs: Record<string, unknown>;
@@ -73,6 +74,7 @@ export class AuditLogger {
       timestamp,
       agentName: params.agentName,
       agentVersion: params.agentVersion,
+      category: params.category || null,
       pluginId: params.pluginId,
       toolName: params.toolName,
       inputArgs: JSON.stringify(params.inputArgs),
@@ -107,6 +109,9 @@ export class AuditLogger {
     }
 
     // Exact match filters
+    if (filters.category) {
+      conditions.push(eq(auditLogs.category, filters.category));
+    }
     if (filters.pluginId) {
       conditions.push(eq(auditLogs.pluginId, filters.pluginId));
     }
@@ -296,6 +301,9 @@ export class AuditLogger {
     }
     if (filters.endDate) {
       conditions.push(lte(auditLogs.timestamp, filters.endDate));
+    }
+    if (filters.category) {
+      conditions.push(eq(auditLogs.category, filters.category));
     }
     if (filters.pluginId) {
       conditions.push(eq(auditLogs.pluginId, filters.pluginId));
