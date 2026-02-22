@@ -112,6 +112,250 @@
 
 ---
 
+### Phase 5.5: Multi-Account Support & Universal Service Interface (HIGH PRIORITY)
+
+**Goal**: Enable multiple accounts per provider (e.g., 3 Gmail accounts) and expose universal service-agnostic tools
+
+**Architecture Decision**: Hybrid approach
+- Universal tools (`list_emails`) that query ALL configured accounts/providers
+- Provider-specific tools (`com.corelink.gmail__list_emails`) for explicit control
+- Account identification via email address (e.g., `work@gmail.com`, `personal@gmail.com`)
+
+**Tasks**:
+
+#### 5.5.1: Multi-Account Database Foundation
+
+1. **Add `accounts` table** to schema
+   ```sql
+   accounts:
+   - id (UUID, primary key)
+   - pluginId (foreign key to plugins.id)
+   - email (text, account identifier - e.g., "work@gmail.com")
+   - displayName (text, optional friendly name)
+   - isPrimary (boolean, default false - one primary per plugin)
+   - metadata (JSON, provider-specific data)
+   - createdAt, updatedAt (timestamps)
+   - UNIQUE constraint on (pluginId, email)
+   ```
+
+2. **Update `credentials` table**
+   - Add `accountId` column (foreign key to accounts.id)
+   - Migration: Create default account for existing credentials
+   - Change unique constraint from `pluginId` to `accountId`
+
+3. **Update `auditLogs` table**
+   - Add `accountId` column (foreign key to accounts.id)
+   - Add `accountEmail` column (denormalized for quick filtering)
+   - Enable queries like "show all actions on work@gmail.com"
+
+**Files to modify**:
+- `packages/gateway/src/db/schema.ts` (add accounts table, update credentials)
+- `packages/gateway/src/db/migrations/` (new migration file)
+
+#### 5.5.2: Multi-Account Credential Management
+
+1. **Extend `CredentialManager` service**
+   - `createAccount(pluginId, email, displayName?)` → accountId
+   - `listAccounts(pluginId?)` → Account[]
+   - `getAccountCredentials(accountId)` → PluginCredentials
+   - `setAccountCredentials(accountId, credentials)` → void
+   - `deleteAccount(accountId)` → void
+   - `setPrimaryAccount(accountId)` → void
+
+2. **Update OAuth flows**
+   - Capture email address during OAuth callback
+   - Gmail: Extract from `userinfo` endpoint
+   - Outlook: Extract from Graph API `/me` endpoint
+   - Create account record before storing credentials
+   - Prompt user to confirm/rename account
+
+3. **Migration strategy**
+   - Auto-create account for existing single credentials
+   - Use email from OAuth provider as account identifier
+   - Mark as primary by default
+
+**Files to modify**:
+- `packages/gateway/src/services/credential-manager.ts`
+- `packages/gateway/src/routes/oauth.ts` (Gmail)
+- `packages/gateway/src/routes/outlook-oauth.ts`
+
+#### 5.5.3: Universal Service Router
+
+1. **Create `UniversalServiceRouter` service**
+   - Accepts generic tool calls without plugin prefix
+   - Routes to ALL active accounts across providers
+   - Aggregates results from multiple providers
+   - Handles parallel execution with Promise.all()
+   - Sorts merged results by timestamp
+
+   Example flow:
+   ```
+   AI calls: list_emails(max_results: 10)
+
+   Router queries:
+   - Gmail account: work@gmail.com
+   - Gmail account: personal@gmail.com
+   - Outlook account: corporate@outlook.com
+
+   Returns: Merged 30 emails, sorted by date, limited to 10 most recent
+   ```
+
+2. **Implement universal tools**
+   - `list_emails(max_results?, query?)` → Email[]
+   - `read_email(email_id, provider?)` → Email (provider auto-detected from cache)
+   - `send_email(to, subject, body, from_account?)` → EmailResult
+   - `search_emails(query, max_results?)` → Email[]
+
+3. **Add provider detection logic**
+   - When reading email, check `emailCache` to find source account
+   - Fallback: try all providers until found
+   - Error if email not found in any account
+
+**Files to create**:
+- `packages/gateway/src/services/universal-service-router.ts`
+- `packages/gateway/src/services/email-aggregator.ts`
+
+#### 5.5.4: Email Cache & Cross-Provider Tracking
+
+1. **Add `emailCache` table**
+   ```sql
+   emailCache:
+   - id (UUID, primary key)
+   - accountId (foreign key to accounts.id)
+   - providerId (text, e.g., "com.corelink.gmail")
+   - providerEmailId (text, provider's email ID)
+   - subject (text, indexed)
+   - from (text, indexed)
+   - to (text)
+   - timestamp (integer, indexed)
+   - snippet (text, first 200 chars)
+   - isRead (boolean)
+   - labels (JSON array)
+   - cachedAt (timestamp)
+   - UNIQUE constraint on (accountId, providerEmailId)
+   ```
+
+2. **Implement cache population**
+   - On `list_emails`, cache returned email metadata
+   - On `read_email`, cache full email details
+   - TTL strategy: cache for 1 hour, then refresh
+   - Optional: Background sync job to keep cache fresh
+
+3. **Deduplication strategy**
+   - Same email in multiple accounts (e.g., forwarded emails)
+   - Use `Message-ID` header to detect duplicates
+   - Option to show duplicates or hide
+
+**Files to create**:
+- `packages/gateway/src/services/email-cache.ts`
+- Add `emailCache` table to schema
+
+#### 5.5.5: Update MCP Plugin Registry
+
+1. **Expose both universal AND provider-specific tools**
+   - Universal tools: `list_emails`, `send_email`, etc.
+   - Provider-specific: `com.corelink.gmail__list_emails` (existing)
+   - Let AI agents choose which to use
+
+2. **Tool registration logic**
+   ```typescript
+   // Universal tools (new)
+   registerTool('list_emails', ..., universalRouter.listEmails)
+   registerTool('send_email', ..., universalRouter.sendEmail)
+
+   // Provider-specific tools (existing)
+   registerTool('com.corelink.gmail__list_emails', ..., gmailPlugin.execute)
+   ```
+
+3. **Update tool descriptions**
+   - Universal: "List emails from ALL configured accounts (Gmail, Outlook, etc.)"
+   - Provider-specific: "[Gmail] List emails from Gmail account only"
+
+**Files to modify**:
+- `packages/gateway/src/mcp/plugin-registry.ts`
+- `packages/gateway/src/index.ts` (MCP server setup)
+
+#### 5.5.6: Web UI for Account Management
+
+1. **Add Account Management page** (`/accounts`)
+   - List all accounts grouped by provider
+   - Show email address, connection status, primary badge
+   - Add new account button (launches OAuth flow)
+   - Delete account (with confirmation)
+   - Set as primary account
+
+2. **Update provider cards**
+   - Show account count (e.g., "2 accounts connected")
+   - Click to expand and see all accounts
+   - Add account button per provider
+
+3. **Account selector for send_email**
+   - Dropdown to select "from" account when sending
+   - Default to primary account
+   - Show account email addresses
+
+**Files to create**:
+- `packages/web/src/pages/Accounts.tsx`
+- Update `packages/web/src/App.tsx`
+
+#### 5.5.7: Active Provider Management (Use existing activeProviders table)
+
+1. **Implement active provider service**
+   - `setActiveProvider(category, pluginId)` → void
+   - `getActiveProvider(category)` → Plugin
+   - Fallback if active provider has no accounts connected
+
+2. **Add UI to set active provider**
+   - Radio buttons in provider cards
+   - "Make active" button (only if accounts exist)
+   - Show "Active" badge on current provider
+
+3. **Use active provider for single-result queries**
+   - `send_email` → uses primary account of active provider
+   - Universal tools query ALL, not just active
+
+**Files to create**:
+- `packages/gateway/src/services/active-provider-manager.ts`
+
+---
+
+**Technical Considerations**:
+
+1. **Migration Path**
+   - Existing single-account credentials → auto-create account record
+   - Preserve backward compatibility during migration
+   - Database migration script to populate accounts table
+
+2. **Performance**
+   - Parallel queries to multiple accounts (Promise.all)
+   - Cache email metadata to avoid repeated API calls
+   - Consider rate limiting per account (Gmail: 250 quota/day)
+
+3. **Error Handling**
+   - If one account fails, show partial results from other accounts
+   - Tag results with source account for debugging
+   - Graceful degradation if cache unavailable
+
+4. **Email Deduplication**
+   - Same email forwarded to multiple accounts
+   - Option: "Show duplicates" vs "Hide duplicates"
+   - Use Message-ID header for detection
+
+5. **Account Naming**
+   - Primary: Use email address from OAuth provider
+   - Allow user to add friendly nickname (optional)
+   - Validation: email must be unique per plugin
+
+**Estimated time**: 5-7 days
+
+**Priority Justification**: This is HIGH PRIORITY because:
+- Aligns with CoreLink's core vision of service abstraction
+- Enables real-world use case (work + personal email)
+- Foundation for future multi-user support
+- Makes universal interface actually "universal"
+
+---
+
 ### Phase 6: Audit Logging UI (MEDIUM PRIORITY)
 
 **Goal**: Visualize all AI agent actions
@@ -312,10 +556,13 @@
 Before releasing V1, ensure:
 
 - [ ] Gmail and Outlook plugins fully working
+- [ ] **Multi-account support (Phase 5.5)** - Multiple Gmail/Outlook accounts
+- [ ] **Universal service interface** - Generic `list_emails` tool that queries all accounts
 - [ ] Policy engine with at least 5 example policies
 - [ ] MCP server tested with Claude Code
 - [ ] Audit logging with export functionality
 - [ ] Token refresh implemented
+- [ ] Email cache for cross-provider tracking
 - [ ] Comprehensive README with screenshots
 - [ ] Setup guides for Gmail and Outlook
 - [ ] Docker deployment option
@@ -329,16 +576,18 @@ Before releasing V1, ensure:
 
 ## 💡 Future Ideas (V2+)
 
-- **More Plugins**: Google Calendar, Notion, Slack, GitHub
+- **More Plugins**: Google Calendar, Notion, Slack, GitHub, Google Tasks
 - **Policy Templates**: Pre-built policies for common scenarios
 - **Plugin Marketplace**: Browse and install community plugins
-- **Multi-user Support**: Each user has their own credentials
-- **Webhook Support**: Trigger actions on events
-- **AI Agent Profiles**: Different policies per agent
-- **Mobile App**: iOS/Android dashboard
-- **Browser Extension**: Quick access to audit logs
-- **Policy Testing**: Dry-run mode to test policies
-- **Advanced Redaction**: ML-based PII detection
+- **Multi-user Support**: Each user has their own accounts (team collaboration)
+- **Webhook Support**: Trigger actions on events (e.g., new email → Slack notification)
+- **AI Agent Profiles**: Different policies per agent (Claude strict, GPT permissive)
+- **Mobile App**: iOS/Android dashboard for audit logs and account management
+- **Browser Extension**: Quick access to audit logs and approve/deny requests
+- **Policy Testing**: Dry-run mode to test policies before enabling
+- **Advanced Redaction**: ML-based PII detection (emails, phone numbers, SSNs)
+- **Email Sync Optimization**: Background workers to keep email cache fresh
+- **Smart Deduplication**: ML to detect duplicate emails across accounts (beyond Message-ID)
 
 ---
 
