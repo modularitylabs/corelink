@@ -31,6 +31,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { PluginRegistry } from './mcp/plugin-registry.js';
 import { MCPSessionManager } from './mcp/http-handler.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { z } from 'zod';
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -93,6 +94,58 @@ See OUTLOOK_SETUP.md for instructions.
   }
 }
 
+/**
+ * Convert JSON Schema to Zod schema
+ * This is a simple converter for the schemas we use in plugins
+ */
+function jsonSchemaToZod(jsonSchema: Record<string, any>): z.ZodTypeAny {
+  if (jsonSchema.type !== 'object') {
+    return z.any();
+  }
+
+  const shape: Record<string, z.ZodTypeAny> = {};
+  const properties = jsonSchema.properties || {};
+  const required = jsonSchema.required || [];
+
+  for (const [key, prop] of Object.entries(properties) as [string, any][]) {
+    let zodType: z.ZodTypeAny;
+
+    switch (prop.type) {
+      case 'string':
+        zodType = z.string();
+        break;
+      case 'number':
+        zodType = z.number();
+        break;
+      case 'boolean':
+        zodType = z.boolean();
+        break;
+      case 'array':
+        zodType = z.array(z.any());
+        break;
+      case 'object':
+        zodType = z.object({});
+        break;
+      default:
+        zodType = z.any();
+    }
+
+    // Add description if present
+    if (prop.description) {
+      zodType = zodType.describe(prop.description);
+    }
+
+    // Make optional if not in required array
+    if (!required.includes(key)) {
+      zodType = zodType.optional();
+    }
+
+    shape[key] = zodType;
+  }
+
+  return z.object(shape);
+}
+
 async function start() {
   // Validate environment before starting
   validateEnvironment();
@@ -103,103 +156,108 @@ async function start() {
   // Initialize services
   const credentialManager = new CredentialManager(db);
 
-  // Initialize MCP server and plugin registry
+  // Initialize plugin registry
   const pluginRegistry = new PluginRegistry(db);
   await pluginRegistry.loadPlugins();
-
-  const mcpServer = new McpServer(
-    {
-      name: 'CoreLink Gateway',
-      version: '0.1.0',
-    },
-    {
-      capabilities: {
-        tools: {},
-      },
-    }
-  );
-
-  // Register all plugin tools with MCP server
   const tools = await pluginRegistry.getAllTools();
-  for (const tool of tools) {
-    mcpServer.registerTool(
-      tool.name,
+
+  // Create MCP server factory - each session gets its own server instance
+  const createMcpServer = () => {
+    const server = new McpServer(
       {
-        description: tool.description,
-        inputSchema: tool.inputSchema as any,
+        name: 'CoreLink Gateway',
+        version: '0.1.0',
       },
-      async (args: any): Promise<CallToolResult> => {
-        const plugin = await pluginRegistry.getPluginForTool(tool.name);
-        if (!plugin) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Error: Plugin not found for tool: ${tool.name}`,
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        // Extract original tool name (remove plugin ID prefix)
-        // Format is: pluginId__toolName
-        const originalToolName = tool.name.split('__')[1] || tool.name;
-
-        // Get credentials
-        const credentials = await credentialManager.getCredentials(plugin.id);
-        if (!credentials) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Error: Plugin "${plugin.name}" is not authenticated. Please connect it first via the web dashboard at http://localhost:${PORT}`,
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        // Execute tool
-        try {
-          const result = await plugin.execute(
-            originalToolName,
-            args || {},
-            {
-              auth: credentials,
-              settings: {},
-              logger: (message: string, level = 'info') => {
-                console.log(`[${plugin.id}] [${level}] ${message}`);
-              },
-            }
-          );
-
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result.data, null, 2),
-              },
-            ],
-          };
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Error executing ${originalToolName}: ${errorMessage}`,
-              },
-            ],
-            isError: true,
-          };
-        }
+      {
+        capabilities: {
+          tools: {},
+        },
       }
     );
-  }
 
-  // Create MCP session manager
-  const mcpSessionManager = new MCPSessionManager();
+    // Register all plugin tools
+    for (const tool of tools) {
+      server.registerTool(
+        tool.name,
+        {
+          description: tool.description,
+          inputSchema: jsonSchemaToZod(tool.inputSchema as Record<string, any>),
+        },
+        async (args: any): Promise<CallToolResult> => {
+          const plugin = await pluginRegistry.getPluginForTool(tool.name);
+          if (!plugin) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `Error: Plugin not found for tool: ${tool.name}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          // Extract original tool name (remove plugin ID prefix)
+          // Format is: pluginId__toolName
+          const originalToolName = tool.name.split('__')[1] || tool.name;
+
+          // Get credentials
+          const credentials = await credentialManager.getCredentials(plugin.id);
+          if (!credentials) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `Error: Plugin "${plugin.name}" is not authenticated. Please connect it first via the web dashboard at http://localhost:${PORT}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          // Execute tool
+          try {
+            const result = await plugin.execute(
+              originalToolName,
+              args || {},
+              {
+                auth: credentials,
+                settings: {},
+                logger: (message: string, level = 'info') => {
+                  console.log(`[${plugin.id}] [${level}] ${message}`);
+                },
+              }
+            );
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result.data, null, 2),
+                },
+              ],
+            };
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `Error executing ${originalToolName}: ${errorMessage}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+        }
+      );
+    }
+
+    return server;
+  };
+
+  // Create MCP session manager with server factory
+  const mcpSessionManager = new MCPSessionManager(createMcpServer);
 
   // Create Fastify instance
   const fastify = Fastify({
@@ -237,15 +295,15 @@ async function start() {
 
   // Register MCP HTTP routes
   fastify.post('/mcp', async (request, reply) => {
-    await mcpSessionManager.handleRequest(request, reply, mcpServer);
+    await mcpSessionManager.handleRequest(request, reply);
   });
 
   fastify.get('/mcp', async (request, reply) => {
-    await mcpSessionManager.handleRequest(request, reply, mcpServer);
+    await mcpSessionManager.handleRequest(request, reply);
   });
 
   fastify.delete('/mcp', async (request, reply) => {
-    await mcpSessionManager.handleRequest(request, reply, mcpServer);
+    await mcpSessionManager.handleRequest(request, reply);
   });
 
   // Graceful shutdown
