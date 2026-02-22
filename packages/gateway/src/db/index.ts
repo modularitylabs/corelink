@@ -52,3 +52,21 @@ export function runMigrations(db: ReturnType<typeof initDatabase>['db']) {
 
 export { schema };
 export type Database = ReturnType<typeof initDatabase>['db'];
+
+// Singleton database instance for use in services
+// This is initialized lazily on first access
+let _dbInstance: ReturnType<typeof initDatabase> | null = null;
+
+export function getDb(): ReturnType<typeof initDatabase>['db'] {
+  if (!_dbInstance) {
+    _dbInstance = initDatabase();
+  }
+  return _dbInstance.db;
+}
+
+// Export as 'db' for convenience
+export const db = new Proxy({} as ReturnType<typeof initDatabase>['db'], {
+  get(_target, prop) {
+    return getDb()[prop as keyof ReturnType<typeof initDatabase>['db']];
+  },
+});

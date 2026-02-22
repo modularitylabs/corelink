@@ -28,48 +28,53 @@
 - [x] Service abstraction demonstration (both use same tools)
 - [x] Documentation (OUTLOOK_SETUP.md)
 
+#### Phase 4: Policy Engine ✅ COMPLETED (2025-02-22)
+- [x] PolicyEngine service with JSON Logic evaluation
+- [x] AuditLogger service for tracking all actions
+- [x] Integration with MCP Server tool execution flow
+- [x] All 4 policy actions: ALLOW, BLOCK, REDACT, REQUIRE_APPROVAL
+- [x] Redaction pattern system with regex support
+- [x] Approval request workflow
+- [x] Default policies and redaction patterns seeding
+- [x] REST API routes for policy management
+- [x] REST API routes for audit log queries
+
 ---
 
 ## 🚀 Next Steps (Priority Order)
 
-### Phase 4: Policy Engine (HIGH PRIORITY)
+### Phase 4.5: Policy & Audit UI (MEDIUM PRIORITY)
 
-**Goal**: Implement rule-based access control using json-logic-js
+**Goal**: Build web interfaces for managing policies and viewing audit logs
 
 **Tasks**:
-1. **Create PolicyEngine service** (`packages/gateway/src/services/policy-engine.ts`)
-   - Load policy rules from database
-   - Evaluate rules using json-logic-js
-   - Return PolicyResult (ALLOW/BLOCK/REDACT/REQUIRE_APPROVAL)
-   - Handle redaction of sensitive fields
+1. **Policy Management UI** (`packages/web/src/pages/Policies.tsx`)
+   - List all policy rules with filtering
+   - Create/edit/delete policies
+   - Visual JSON Logic rule builder
+   - Enable/disable toggle
+   - Priority ordering
+   - Test policies against sample data
 
-2. **Integrate PolicyEngine into execution flow**
-   - Intercept all plugin execute() calls
-   - Evaluate policy before execution
-   - Log policy decisions in audit log
-   - Block or redact based on result
+2. **Audit Log Viewer** (`packages/web/src/pages/AuditLog.tsx`)
+   - Paginated table of audit entries
+   - Filter by: date, agent, plugin, tool, action, status
+   - View full request/response details
+   - Export logs to CSV/JSON
+   - Real-time updates (SSE)
 
-3. **Create default policies**
-   - Insert sample policies into database on first run
-   - Example: "Allow list_emails with max 10 results"
-   - Example: "Block all send_email operations"
-   - Example: "Redact email body content"
+3. **Redaction Pattern Management**
+   - List redaction patterns
+   - Create/edit regex patterns
+   - Test patterns against sample text
+   - Enable/disable patterns
 
-4. **Add Policy Management UI**
-   - Web UI page: `/policies`
-   - List all active policies
-   - Toggle enable/disable
-   - Create new policy with visual rule builder
-   - Test policy against sample inputs
+4. **Approval Request Dashboard**
+   - List pending approval requests
+   - Approve/deny with optional arg modification
+   - View approval history
 
-**Files to create**:
-- `packages/gateway/src/services/policy-engine.ts`
-- `packages/web/src/pages/Policies.tsx`
-- `packages/gateway/src/middleware/policy-middleware.ts`
-
-**Dependencies**: `json-logic-js` (already in package.json)
-
-**Estimated time**: 2-3 days
+**Estimated time**: 1-2 days
 
 ---
 
@@ -112,16 +117,92 @@
 
 ---
 
-### Phase 5.5: Multi-Account Support & Universal Service Interface (HIGH PRIORITY)
+### Phase 5.5: Multi-Account Support & Use-Case Service Architecture (HIGH PRIORITY)
 
-**Goal**: Enable multiple accounts per provider (e.g., 3 Gmail accounts) and expose universal service-agnostic tools
+**Goal**: Build email service abstraction with 3 providers, multi-account support, and universal interface
 
-**Architecture Decision**: Hybrid approach
-- Universal tools (`list_emails`) that query ALL configured accounts/providers
-- Provider-specific tools (`com.corelink.gmail__list_emails`) for explicit control
-- Account identification via email address (e.g., `work@gmail.com`, `personal@gmail.com`)
+**Architecture Strategy**: Use-Case-Centric Evolution
+- **Focus**: Perfect the email use case first with 3 diverse providers
+- **Learn**: Extract common patterns, validate abstractions
+- **Apply**: Use proven patterns for calendar (Phase 6) and tasks (Phase 7)
+
+**Architecture Decisions**:
+1. **Hybrid folder structure**: Keep `plugins/` for providers, add `services/email/` for business logic
+2. **Universal + provider-specific tools**: Expose both `list_emails` AND `com.corelink.gmail__list_emails`
+3. **Account identification**: Via email address (e.g., `work@gmail.com`, `personal@gmail.com`)
+4. **3 email providers**: Gmail, Outlook, ProtonMail/IMAP (validates abstraction isn't Google/MS-specific)
+
+**Why use-case-by-use-case?**
+- Email is the most complex (attachments, threading, labels, filters)
+- 3 providers with different auth methods (OAuth vs IMAP/SMTP)
+- Lessons learned inform calendar/task architecture
+- Validates abstractions with real diversity before expanding
 
 **Tasks**:
+
+#### 5.5.0: Email Service Architecture Foundation (NEW - Do This First!)
+
+**Goal**: Create use-case service layer that orchestrates multiple email providers
+
+1. **Design `IEmailProvider` interface**
+   ```typescript
+   interface IEmailProvider {
+     listEmails(account: Account, args: ListEmailsArgs): Promise<Email[]>;
+     readEmail(account: Account, emailId: string): Promise<Email>;
+     sendEmail(account: Account, args: SendEmailArgs): Promise<EmailResult>;
+     searchEmails(account: Account, args: SearchEmailsArgs): Promise<Email[]>;
+   }
+   ```
+   - Defines standard contract all email providers must implement
+   - Account-aware (each method receives Account object)
+   - Returns normalized Email/EmailResult types
+
+2. **Create `EmailService` orchestrator**
+   ```typescript
+   class EmailService {
+     constructor(private providers: Map<string, IEmailProvider>) {}
+
+     async listEmails(args: ListEmailsArgs): Promise<Email[]> {
+       // Query ALL email accounts across ALL providers
+       const accounts = await getEmailAccounts();
+       const results = await Promise.all(
+         accounts.map(acc => this.providers.get(acc.pluginId).listEmails(acc, args))
+       );
+       return this.normalize(results).sort(byTimestamp).slice(0, args.max_results);
+     }
+   }
+   ```
+   - Aggregates results from multiple providers
+   - Handles parallel execution
+   - Normalizes and sorts cross-provider results
+
+3. **Create shared utilities**
+   - `services/shared/retry.ts` - Exponential backoff retry logic
+   - `services/shared/rate-limiter.ts` - Per-account rate limiting
+   - `services/shared/cache.ts` - Generic caching interface
+   - `services/shared/normalizer.ts` - Response standardization
+
+4. **Update plugin interface**
+   ```typescript
+   // packages/core/src/types/plugin.ts
+   - readonly category: PluginCategory;
+   + readonly categories: PluginCategory[];  // Allow multi-use-case providers
+   ```
+
+**Files to create**:
+- `packages/gateway/src/services/email/EmailService.ts`
+- `packages/gateway/src/services/email/IEmailProvider.ts`
+- `packages/gateway/src/services/email/types.ts` (Email, EmailResult, etc.)
+- `packages/gateway/src/services/shared/retry.ts`
+- `packages/gateway/src/services/shared/rate-limiter.ts`
+- `packages/gateway/src/services/shared/cache.ts`
+
+**Files to modify**:
+- `packages/core/src/types/plugin.ts` (category → categories)
+
+**Estimated time**: 1-2 days
+
+---
 
 #### 5.5.1: Multi-Account Database Foundation
 
@@ -179,43 +260,101 @@
 - `packages/gateway/src/routes/oauth.ts` (Gmail)
 - `packages/gateway/src/routes/outlook-oauth.ts`
 
-#### 5.5.3: Universal Service Router
+#### 5.5.3: Email Service Implementation & Integration
 
-1. **Create `UniversalServiceRouter` service**
-   - Accepts generic tool calls without plugin prefix
-   - Routes to ALL active accounts across providers
-   - Aggregates results from multiple providers
-   - Handles parallel execution with Promise.all()
-   - Sorts merged results by timestamp
+1. **Refactor Gmail plugin to implement IEmailProvider**
+   - Extract business logic from `plugins/gmail/src/index.ts`
+   - Move to `services/email/providers/GmailProvider.ts`
+   - Keep OAuth and credential management in plugin
+   - Plugin delegates tool execution to GmailProvider
+
+2. **Refactor Outlook plugin to implement IEmailProvider**
+   - Extract business logic from `plugins/outlook/src/index.ts`
+   - Move to `services/email/providers/OutlookProvider.ts`
+   - Keep Microsoft Graph OAuth in plugin
+   - Plugin delegates tool execution to OutlookProvider
+
+3. **Implement EmailService methods**
+   - `listEmails()` - Query all accounts, merge, sort by timestamp
+   - `readEmail()` - Auto-detect provider from emailId or cache
+   - `sendEmail()` - Use specified account or primary account
+   - `searchEmails()` - Query all accounts with search term
 
    Example flow:
    ```
    AI calls: list_emails(max_results: 10)
 
-   Router queries:
-   - Gmail account: work@gmail.com
-   - Gmail account: personal@gmail.com
-   - Outlook account: corporate@outlook.com
+   EmailService queries:
+   - GmailProvider.listEmails(work@gmail.com, args)
+   - GmailProvider.listEmails(personal@gmail.com, args)
+   - OutlookProvider.listEmails(corporate@outlook.com, args)
 
    Returns: Merged 30 emails, sorted by date, limited to 10 most recent
    ```
 
-2. **Implement universal tools**
-   - `list_emails(max_results?, query?)` → Email[]
-   - `read_email(email_id, provider?)` → Email (provider auto-detected from cache)
-   - `send_email(to, subject, body, from_account?)` → EmailResult
-   - `search_emails(query, max_results?)` → Email[]
-
-3. **Add provider detection logic**
-   - When reading email, check `emailCache` to find source account
-   - Fallback: try all providers until found
-   - Error if email not found in any account
+4. **Add error handling**
+   - If one provider fails, return partial results from others
+   - Tag results with source account for debugging
+   - Log provider failures without breaking aggregation
 
 **Files to create**:
-- `packages/gateway/src/services/universal-service-router.ts`
-- `packages/gateway/src/services/email-aggregator.ts`
+- `packages/gateway/src/services/email/providers/GmailProvider.ts`
+- `packages/gateway/src/services/email/providers/OutlookProvider.ts`
 
-#### 5.5.4: Email Cache & Cross-Provider Tracking
+**Files to modify**:
+- `plugins/gmail/src/index.ts` (delegate to GmailProvider)
+- `plugins/outlook/src/index.ts` (delegate to OutlookProvider)
+
+---
+
+#### 5.5.4: ProtonMail/IMAP Plugin (NEW - 3rd Provider!)
+
+**Goal**: Validate email abstraction with non-OAuth provider
+
+1. **Create ProtonMail Bridge IMAP plugin**
+   - Use ProtonMail Bridge (provides IMAP/SMTP interface)
+   - Authentication: username + password (not OAuth!)
+   - Tests that IEmailProvider works beyond Google/Microsoft
+
+2. **Implement IEmailProvider for IMAP**
+   - Use `node-imap` library for IMAP operations
+   - Use `nodemailer` for SMTP sending
+   - Map IMAP folders to standard email concepts
+   - Handle IMAP-specific quirks (UIDs, flags, folder structure)
+
+3. **Create IMAP/SMTP credential flow**
+   - Different from OAuth - needs server, port, username, password
+   - Add configuration UI for IMAP settings
+   - Test connection before saving credentials
+   - Support generic IMAP (not just ProtonMail)
+
+4. **Edge cases to handle**
+   - No calendar/tasks support (ProtonMail is email-only)
+   - Different authentication model (no refresh tokens)
+   - Manual server configuration (imap.protonmail.com:1143)
+
+**Why this validates the abstraction:**
+- Tests non-OAuth authentication
+- Proves IEmailProvider isn't coupled to REST APIs
+- Shows edge cases (no multi-use-case support)
+- Generic IMAP means works with any email provider (Gmail IMAP, FastMail, etc.)
+
+**Files to create**:
+- `plugins/protonmail/src/index.ts`
+- `plugins/protonmail/src/imap-client.ts`
+- `packages/gateway/src/services/email/providers/ProtonMailProvider.ts`
+- `packages/gateway/src/routes/protonmail-config.ts` (manual config, not OAuth)
+
+**Dependencies**:
+- `node-imap` (IMAP client)
+- `nodemailer` (SMTP client)
+- `mailparser` (parse IMAP messages)
+
+**Estimated time**: 2-3 days
+
+---
+
+#### 5.5.5: Email Cache & Cross-Provider Tracking
 
 1. **Add `emailCache` table**
    ```sql
@@ -250,7 +389,7 @@
 - `packages/gateway/src/services/email-cache.ts`
 - Add `emailCache` table to schema
 
-#### 5.5.5: Update MCP Plugin Registry
+#### 5.5.6: Update MCP Plugin Registry
 
 1. **Expose both universal AND provider-specific tools**
    - Universal tools: `list_emails`, `send_email`, etc.
@@ -275,7 +414,7 @@
 - `packages/gateway/src/mcp/plugin-registry.ts`
 - `packages/gateway/src/index.ts` (MCP server setup)
 
-#### 5.5.6: Web UI for Account Management
+#### 5.5.7: Web UI for Account Management
 
 1. **Add Account Management page** (`/accounts`)
    - List all accounts grouped by provider
@@ -298,7 +437,7 @@
 - `packages/web/src/pages/Accounts.tsx`
 - Update `packages/web/src/App.tsx`
 
-#### 5.5.7: Active Provider Management (Use existing activeProviders table)
+#### 5.5.8: Active Provider Management (Use existing activeProviders table)
 
 1. **Implement active provider service**
    - `setActiveProvider(category, pluginId)` → void
@@ -346,13 +485,59 @@
    - Allow user to add friendly nickname (optional)
    - Validation: email must be unique per plugin
 
-**Estimated time**: 5-7 days
+---
 
-**Priority Justification**: This is HIGH PRIORITY because:
+**Phase 5.5 Summary & Architecture Impact**
+
+**Total Estimated Time: 7-10 days** (breakdown):
+- 5.5.0: Service architecture (1-2 days)
+- 5.5.1: Database foundation (1 day)
+- 5.5.2: Credential management (1 day)
+- 5.5.3: Provider refactoring (1-2 days)
+- 5.5.4: ProtonMail/IMAP plugin (2-3 days)
+- 5.5.5: Email cache (1 day)
+- 5.5.6: MCP registry updates (0.5 days)
+- 5.5.7: Web UI (1 day)
+- 5.5.8: Active providers (0.5 days)
+
+**What This Achieves:**
+
+1. **Validated Email Abstraction**
+   - 3 diverse providers (OAuth + IMAP, Google + Microsoft + independent)
+   - Proven `IEmailProvider` interface works across auth methods
+   - Real-world multi-account support (work + personal + side project)
+
+2. **Use-Case Service Pattern**
+   - Established pattern for `services/email/` architecture
+   - Shared utilities (`retry`, `cache`, `rate-limiter`) ready for reuse
+   - Clear separation: plugins own auth, services own business logic
+
+3. **Foundation for Other Use Cases**
+   - Calendar (Phase 6): Apply EmailService pattern → CalendarService
+   - Tasks (Phase 7): Reuse shared utilities, proven adapter pattern
+   - Notes, Storage (Future): Drop-in new use-case services
+
+4. **Architecture Learnings**
+   - What abstracts well (list, read, send, search)
+   - What doesn't (provider-specific features like labels, categories)
+   - How to handle partial failures (one provider down)
+   - Rate limiting strategies per provider
+
+**Priority Justification**: This is **CRITICAL for V1** because:
 - Aligns with CoreLink's core vision of service abstraction
-- Enables real-world use case (work + personal email)
-- Foundation for future multi-user support
-- Makes universal interface actually "universal"
+- Validates architecture before expanding to 5+ use cases
+- Enables real-world multi-account use case (most requested feature)
+- Makes universal interface actually "universal" (3 providers prove it)
+- Prevents costly refactors by getting abstractions right upfront
+- Foundation for multi-user support in V2
+
+**Success Criteria:**
+- ✅ AI agent calls `list_emails` and gets results from Gmail + Outlook + ProtonMail
+- ✅ User can connect 2 Gmail, 1 Outlook, 1 ProtonMail account
+- ✅ Switching active email provider works seamlessly
+- ✅ Provider-specific tools still accessible (`gmail__create_label`)
+- ✅ Shared retry/cache/rate-limit utilities work across all providers
+- ✅ Code patterns are documented for calendar/task implementation
 
 ---
 

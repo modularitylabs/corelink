@@ -24,9 +24,11 @@ if (result.error) {
 }
 
 import { initDatabase, runMigrations } from './db/index.js';
+import { seedPolicies } from './db/seed-policies.js';
 import { CredentialManager } from './services/credential-manager.js';
 import { oauthRoutes } from './routes/oauth.js';
 import { outlookOAuthRoutes } from './routes/outlook-oauth.js';
+import { policyRoutes } from './routes/policies.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { PluginRegistry } from './mcp/plugin-registry.js';
 import { MCPSessionManager } from './mcp/http-handler.js';
@@ -152,6 +154,9 @@ async function start() {
   // Initialize database
   const { db } = initDatabase();
   runMigrations(db);
+
+  // Seed default policies and redaction patterns
+  await seedPolicies();
 
   // Initialize services
   const credentialManager = new CredentialManager(db);
@@ -292,6 +297,9 @@ async function start() {
     await oauthRoutes(instance, credentialManager);
     await outlookOAuthRoutes(instance, credentialManager);
   });
+
+  // Register policy management routes
+  fastify.register(policyRoutes);
 
   // Register MCP HTTP routes
   fastify.post('/mcp', async (request, reply) => {
