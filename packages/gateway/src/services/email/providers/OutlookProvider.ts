@@ -65,13 +65,30 @@ interface Message {
 export class OutlookProvider implements IEmailProvider {
   /**
    * List emails from an Outlook account
+   * OPTIMIZED: Uses $select to exclude body content (only bodyPreview/snippet)
    */
   async listEmails(account: Account, args: ListEmailsArgs): Promise<Email[]> {
     const client = this.getGraphClient(account);
     const maxResults = Math.min(args.max_results || 10, 1000);
 
-    // Build query parameters
-    let endpoint = `/me/messages?$top=${maxResults}&$orderby=receivedDateTime desc`;
+    // Build query parameters with $select to exclude body.content
+    const selectFields = [
+      'id',
+      'subject',
+      'bodyPreview', // Snippet only
+      'from',
+      'toRecipients',
+      'ccRecipients',
+      'bccRecipients',
+      'receivedDateTime',
+      'isRead',
+      'hasAttachments',
+      'categories',
+      'conversationId',
+      'flag',
+    ].join(',');
+
+    let endpoint = `/me/messages?$top=${maxResults}&$orderby=receivedDateTime desc&$select=${selectFields}`;
 
     if (args.query) {
       endpoint += `&$filter=contains(subject,'${args.query}')`;
@@ -157,6 +174,7 @@ export class OutlookProvider implements IEmailProvider {
 
   /**
    * Search emails in Outlook account
+   * OPTIMIZED: Uses $select to exclude body content (only bodyPreview/snippet)
    */
   async searchEmails(account: Account, args: SearchEmailsArgs): Promise<Email[]> {
     const client = this.getGraphClient(account);
@@ -166,7 +184,9 @@ export class OutlookProvider implements IEmailProvider {
     let filterParts: string[] = [];
 
     if (args.query) {
-      filterParts.push(`contains(subject,'${args.query}') or contains(body/content,'${args.query}')`);
+      // Note: For body search, we can't use body/content with $select excluding it
+      // So we search in subject and bodyPreview instead
+      filterParts.push(`contains(subject,'${args.query}') or contains(bodyPreview,'${args.query}')`);
     }
     if (args.from) {
       filterParts.push(`from/emailAddress/address eq '${args.from}'`);
@@ -187,7 +207,24 @@ export class OutlookProvider implements IEmailProvider {
       filterParts.push(`receivedDateTime le ${args.dateTo}`);
     }
 
-    let endpoint = `/me/messages?$top=${maxResults}&$orderby=receivedDateTime desc`;
+    // Use $select to exclude body.content (same as listEmails)
+    const selectFields = [
+      'id',
+      'subject',
+      'bodyPreview',
+      'from',
+      'toRecipients',
+      'ccRecipients',
+      'bccRecipients',
+      'receivedDateTime',
+      'isRead',
+      'hasAttachments',
+      'categories',
+      'conversationId',
+      'flag',
+    ].join(',');
+
+    let endpoint = `/me/messages?$top=${maxResults}&$orderby=receivedDateTime desc&$select=${selectFields}`;
     if (filterParts.length > 0) {
       endpoint += `&$filter=${filterParts.join(' and ')}`;
     }

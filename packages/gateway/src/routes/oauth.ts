@@ -48,6 +48,8 @@ export async function oauthRoutes(
         'https://www.googleapis.com/auth/gmail.readonly',
         'https://www.googleapis.com/auth/gmail.send',
         'https://www.googleapis.com/auth/gmail.modify',
+        'https://www.googleapis.com/auth/userinfo.email', // Required for userinfo API
+        'https://www.googleapis.com/auth/userinfo.profile', // Required for userinfo API
       ],
       prompt: 'consent', // Force consent to get refresh token
       state, // Anti-CSRF token
@@ -103,14 +105,29 @@ export async function oauthRoutes(
         codeVerifier,
       });
 
+      fastify.log.info(`Token exchange successful. Has refresh token: ${!!tokens.refresh_token}`);
+
       // Set credentials to fetch user info
       oauth2Client.setCredentials(tokens);
 
       // Fetch user email from Google API
-      const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
-      const userInfo = await oauth2.userinfo.get();
-      const email = userInfo.data.email;
-      const displayName = userInfo.data.name;
+      let email: string | null | undefined;
+      let displayName: string | null | undefined;
+
+      try {
+        const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+        const userInfo = await oauth2.userinfo.get();
+        email = userInfo.data.email;
+        displayName = userInfo.data.name;
+
+        fastify.log.info(`Successfully fetched user info for: ${email}`);
+      } catch (userInfoError: any) {
+        fastify.log.error(`Failed to fetch user info: ${userInfoError.message}`);
+        return reply.code(500).send({
+          error: 'Failed to fetch user info from Google',
+          details: userInfoError.message,
+        });
+      }
 
       if (!email) {
         return reply.code(500).send({ error: 'Could not retrieve user email from Google' });

@@ -20,6 +20,7 @@ import type {
 export class GmailProvider implements IEmailProvider {
   /**
    * List emails from a Gmail account
+   * OPTIMIZED: Uses 'metadata' format for fast listing (no body content)
    */
   async listEmails(account: Account, args: ListEmailsArgs): Promise<Email[]> {
     const gmail = this.getGmailClient(account);
@@ -34,9 +35,9 @@ export class GmailProvider implements IEmailProvider {
 
     const messages = response.data.messages || [];
 
-    // Fetch full details for each message (in parallel)
+    // Fetch metadata only (headers + snippet, NO body) - much faster!
     const emailPromises = messages.map(msg =>
-      this.fetchEmailDetails(gmail, account, msg.id!)
+      this.fetchEmailMetadata(gmail, account, msg.id!)
     );
 
     const emails = await Promise.all(emailPromises);
@@ -104,6 +105,7 @@ export class GmailProvider implements IEmailProvider {
 
   /**
    * Search emails in Gmail account
+   * OPTIMIZED: Uses 'metadata' format for fast searching (no body content)
    */
   async searchEmails(account: Account, args: SearchEmailsArgs): Promise<Email[]> {
     const gmail = this.getGmailClient(account);
@@ -141,9 +143,9 @@ export class GmailProvider implements IEmailProvider {
 
     const messages = response.data.messages || [];
 
-    // Fetch full details
+    // Fetch metadata only (headers + snippet, NO body) - much faster!
     const emailPromises = messages.map(msg =>
-      this.fetchEmailDetails(gmail, account, msg.id!)
+      this.fetchEmailMetadata(gmail, account, msg.id!)
     );
 
     const emails = await Promise.all(emailPromises);
@@ -193,7 +195,81 @@ export class GmailProvider implements IEmailProvider {
   }
 
   /**
+   * Fetch email metadata only (for listing) - OPTIMIZED
+   * Uses 'metadata' format which returns headers + snippet but NO body content
+   * ~25x less data than 'full' format
+   */
+  private async fetchEmailMetadata(
+    gmail: gmail_v1.Gmail,
+    account: Account,
+    emailId: string
+  ): Promise<Email> {
+    const response = await gmail.users.messages.get({
+      userId: 'me',
+      id: emailId,
+      format: 'metadata',
+      metadataHeaders: ['From', 'To', 'Cc', 'Bcc', 'Subject', 'Date'],
+    });
+
+    const message = response.data;
+    const headers = message.payload?.headers || [];
+
+    // Extract headers
+    const getHeader = (name: string): string | undefined => {
+      const value = headers.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value;
+      return value || undefined;
+    };
+
+    const subject = getHeader('Subject') || '(no subject)';
+    const fromRaw = getHeader('From') || 'unknown';
+    const toRaw = getHeader('To') || '';
+    const ccRaw = getHeader('Cc');
+    const bccRaw = getHeader('Bcc');
+
+    // Parse email addresses
+    const parseAddresses = (raw: string): EmailAddress[] => {
+      if (!raw) return [];
+      return raw.split(',').map(addr => {
+        const match = addr.match(/^(.+?)\s*<(.+?)>$/);
+        if (match) {
+          return { name: match[1].trim(), email: match[2].trim() };
+        }
+        return { email: addr.trim() };
+      });
+    };
+
+    const snippet = message.snippet || '';
+    const labels = message.labelIds || [];
+
+    // Note: hasAttachments check requires parts, which may not be in metadata
+    // We'll check if any parts exist as a heuristic
+    const hasAttachments = (message.payload?.parts?.length || 0) > 1;
+
+    // Normalize to Email type (NO body field - only snippet)
+    return {
+      id: message.id!,
+      accountId: account.id,
+      providerId: account.pluginId,
+      subject,
+      from: parseAddresses(fromRaw)[0] || { email: 'unknown' },
+      to: parseAddresses(toRaw),
+      cc: ccRaw ? parseAddresses(ccRaw) : undefined,
+      bcc: bccRaw ? parseAddresses(bccRaw) : undefined,
+      snippet,
+      timestamp: parseInt(message.internalDate || '0'),
+      isRead: !labels.includes('UNREAD'),
+      isStarred: labels.includes('STARRED'),
+      labels,
+      threadId: message.threadId || undefined,
+      hasAttachments,
+      raw: message as any,
+    };
+  }
+
+  /**
    * Fetch full email details and normalize to Email type
+   * Uses 'full' format which includes complete body content
+   * Used by readEmail() for on-demand full email retrieval
    */
   private async fetchEmailDetails(
     gmail: gmail_v1.Gmail,
@@ -233,7 +309,7 @@ export class GmailProvider implements IEmailProvider {
       });
     };
 
-    // Extract body
+    // Extract body (only available in 'full' format)
     const body = this.extractBody(message.payload);
     const snippet = message.snippet || '';
 

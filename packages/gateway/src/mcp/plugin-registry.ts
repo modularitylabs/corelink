@@ -17,6 +17,7 @@ import * as fs from 'fs';
 export class PluginRegistry {
   private plugins: Map<string, ICoreLinkPlugin> = new Map();
   private toolToPlugin: Map<string, string> = new Map(); // toolName -> pluginId
+  private universalTools: Map<string, Tool> = new Map(); // Universal tools (not plugin-specific)
 
   constructor(_db: Database) {
     // Database reserved for future use (policy engine, plugin metadata, etc.)
@@ -102,26 +103,34 @@ export class PluginRegistry {
   }
 
   /**
-   * Get all available tools from all plugins
+   * Register a universal tool (not associated with any specific plugin)
+   * Used for service-level tools that aggregate across multiple providers
+   */
+  registerUniversalTool(tool: Tool): void {
+    this.universalTools.set(tool.name, tool);
+    console.error(`[PluginRegistry] Registered universal tool: ${tool.name}`);
+  }
+
+  /**
+   * Check if a tool is a universal tool
+   */
+  isUniversalTool(toolName: string): boolean {
+    return this.universalTools.has(toolName);
+  }
+
+  /**
+   * Get all available tools (universal tools + plugin tools)
    */
   async getAllTools(): Promise<Tool[]> {
     const tools: Tool[] = [];
 
-    for (const plugin of this.plugins.values()) {
-      // Add standard tools
-      const standardTools = plugin.getStandardTools();
-      for (const tool of standardTools) {
-        tools.push(this.convertToMCPTool(tool, plugin));
-      }
-
-      // Add native tools if available
-      if (plugin.getNativeTools) {
-        const nativeTools = plugin.getNativeTools();
-        for (const tool of nativeTools) {
-          tools.push(this.convertToMCPTool(tool, plugin));
-        }
-      }
+    // Add universal tools first (these take precedence)
+    for (const tool of this.universalTools.values()) {
+      tools.push(tool);
     }
+
+    // REMOVED: Provider-specific tools are no longer exposed
+    // The gateway now only exposes universal tools for service abstraction
 
     return tools;
   }
@@ -129,6 +138,8 @@ export class PluginRegistry {
   /**
    * Convert CoreLink tool definition to MCP tool format
    * Tool names are prefixed with plugin ID to ensure uniqueness
+   *
+   * NOTE: Currently unused as we only expose universal tools, but kept for future use
    */
   private convertToMCPTool(tool: ToolDefinition, plugin: ICoreLinkPlugin): Tool {
     return {
@@ -137,6 +148,10 @@ export class PluginRegistry {
       inputSchema: tool.inputSchema as any,
     };
   }
+
+  // Suppress unused warning - this is intentionally unused but kept for future provider-specific tools
+  // @ts-ignore
+  private _suppressUnusedWarning = this.convertToMCPTool;
 
   /**
    * Get plugin that provides a specific tool

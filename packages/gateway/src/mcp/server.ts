@@ -15,7 +15,7 @@ import { PluginRegistry } from './plugin-registry.js';
 import { CredentialManager } from '../services/credential-manager.js';
 import { policyEngine } from '../services/policy-engine.js';
 import { auditLogger } from '../services/audit-logger.js';
-import { ExecutionContext } from '@corelink/core';
+import { UniversalEmailRouter } from '../services/email/UniversalEmailRouter.js';
 import type { Database } from '../db/index.js';
 
 /**
@@ -34,11 +34,11 @@ export interface MCPServerConfig {
 export class CoreLinkMCPServer {
   private server: Server;
   private registry: PluginRegistry;
-  private credentialManager: CredentialManager;
+  private emailRouter: UniversalEmailRouter;
 
   constructor(config: MCPServerConfig) {
-    this.credentialManager = config.credentialManager;
     this.registry = new PluginRegistry(config.db);
+    this.emailRouter = new UniversalEmailRouter(config.db, config.credentialManager);
 
     // Create MCP server instance
     this.server = new Server(
@@ -72,28 +72,13 @@ export class CoreLinkMCPServer {
       const startTime = Date.now();
 
       try {
-        // Find which plugin provides this tool
-        const plugin = await this.registry.getPluginForTool(toolName);
-        if (!plugin) {
+        // Check if this is a universal tool
+        if (!this.registry.isUniversalTool(toolName)) {
           return {
             content: [
               {
                 type: 'text',
-                text: `Error: Unknown tool "${toolName}"`,
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        // Get credentials for this plugin
-        const credentials = await this.credentialManager.getCredentials(plugin.id);
-        if (!credentials) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Error: Plugin "${plugin.name}" is not authenticated. Please connect it first via the web dashboard.`,
+                text: `Error: Unknown tool "${toolName}". CoreLink only exposes universal tools.`,
               },
             ],
             isError: true,
@@ -104,10 +89,10 @@ export class CoreLinkMCPServer {
         // Evaluate policy before executing the tool
         const policyResult = await policyEngine.evaluate({
           tool: toolName,
-          plugin: plugin.id,
+          plugin: 'universal', // Universal tools not tied to specific plugin
           agent: 'Claude Code', // TODO: Extract from request metadata
           args: args as Record<string, unknown>,
-          category: plugin.category,
+          category: 'email', // TODO: Derive from tool name
         });
 
         // Handle BLOCK action
@@ -115,8 +100,8 @@ export class CoreLinkMCPServer {
           const executionTime = Date.now() - startTime;
           await auditLogger.log({
             agentName: 'Claude Code',
-            category: plugin.category,
-            pluginId: plugin.id,
+            category: 'email',
+            pluginId: 'universal',
             toolName,
             inputArgs: args as Record<string, unknown>,
             policyDecision: {
@@ -145,8 +130,8 @@ export class CoreLinkMCPServer {
           const executionTime = Date.now() - startTime;
           await auditLogger.log({
             agentName: 'Claude Code',
-            category: plugin.category,
-            pluginId: plugin.id,
+            category: 'email',
+            pluginId: 'universal',
             toolName,
             inputArgs: args as Record<string, unknown>,
             policyDecision: {
@@ -176,17 +161,24 @@ export class CoreLinkMCPServer {
         // Use modified args if REDACT action applied
         const executionArgs = policyResult.modifiedArgs || (args as Record<string, unknown>);
 
-        // Create execution context
-        const context: ExecutionContext = {
-          auth: credentials,
-          settings: {},
-          logger: (message: string, level = 'info') => {
-            console.log(`[${plugin.id}] [${level}] ${message}`);
-          },
-        };
-
-        // Execute the tool
-        const result = await plugin.execute(toolName, executionArgs, context);
+        // Route to appropriate universal router
+        let result;
+        switch (toolName) {
+          case 'list_emails':
+            result = await this.emailRouter.listEmails(executionArgs);
+            break;
+          case 'read_email':
+            result = await this.emailRouter.readEmail(executionArgs);
+            break;
+          case 'send_email':
+            result = await this.emailRouter.sendEmail(executionArgs);
+            break;
+          case 'search_emails':
+            result = await this.emailRouter.searchEmails(executionArgs);
+            break;
+          default:
+            throw new Error(`Universal tool "${toolName}" not implemented`);
+        }
 
         // Handle REDACT action - redact output if needed
         let finalResult = result.data;
@@ -204,8 +196,8 @@ export class CoreLinkMCPServer {
         // Log successful execution
         await auditLogger.log({
           agentName: 'Claude Code',
-          category: plugin.category,
-          pluginId: plugin.id,
+          category: 'email',
+          pluginId: 'universal',
           toolName,
           inputArgs: args as Record<string, unknown>,
           policyDecision: {
@@ -237,24 +229,21 @@ export class CoreLinkMCPServer {
 
         // Log error
         try {
-          const plugin = await this.registry.getPluginForTool(toolName);
-          if (plugin) {
-            await auditLogger.log({
-              agentName: 'Claude Code',
-              category: plugin.category,
-              pluginId: plugin.id,
-              toolName,
-              inputArgs: args as Record<string, unknown>,
-              policyDecision: {
-                action: 'ALLOW', // Error happened during execution, not policy
-                reason: 'Execution error',
-              },
-              status: 'error',
-              errorMessage,
-              executionTimeMs: executionTime,
-              dataSummary: 'Error during execution',
-            });
-          }
+          await auditLogger.log({
+            agentName: 'Claude Code',
+            category: 'email',
+            pluginId: 'universal',
+            toolName,
+            inputArgs: args as Record<string, unknown>,
+            policyDecision: {
+              action: 'ALLOW', // Error happened during execution, not policy
+              reason: 'Execution error',
+            },
+            status: 'error',
+            errorMessage,
+            executionTimeMs: executionTime,
+            dataSummary: 'Error during execution',
+          });
         } catch (logError) {
           console.error('[CoreLink MCP] Failed to log error:', logError);
         }
@@ -283,8 +272,15 @@ export class CoreLinkMCPServer {
    * Start the MCP server with stdio transport
    */
   async start() {
-    // Load all plugins
+    // Load all plugins (needed for EmailService providers)
     await this.registry.loadPlugins();
+
+    // Initialize email router (loads virtual ID mappings into cache)
+    await this.emailRouter.initialize();
+    console.error('[CoreLink MCP] Email router initialized');
+
+    // Register universal email tools
+    this.registerUniversalEmailTools();
 
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
@@ -292,6 +288,139 @@ export class CoreLinkMCPServer {
     console.error('[CoreLink MCP] Server started and listening on stdio');
     console.error(`[CoreLink MCP] Loaded ${this.registry.getPluginCount()} plugins`);
     console.error(`[CoreLink MCP] Available tools: ${(await this.registry.getAllTools()).length}`);
+  }
+
+  /**
+   * Register universal email tools
+   * These tools aggregate across all email providers
+   */
+  private registerUniversalEmailTools() {
+    this.registry.registerUniversalTool({
+      name: 'list_emails',
+      description: 'List emails from ALL configured email accounts (Gmail, Outlook, etc.). Aggregates and sorts by timestamp.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          max_results: {
+            type: 'number',
+            description: 'Maximum number of emails to return (default: 10, max: 500)',
+            default: 10,
+          },
+          query: {
+            type: 'string',
+            description: 'Optional search query',
+          },
+          labels: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Filter by labels/categories',
+          },
+          isRead: {
+            type: 'boolean',
+            description: 'Filter by read/unread status',
+          },
+        },
+      },
+    });
+
+    this.registry.registerUniversalTool({
+      name: 'read_email',
+      description: 'Read a single email by virtual ID. The email_id is obtained from list_emails or search_emails results.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          email_id: {
+            type: 'string',
+            description: 'Virtual email ID (format: email_<id>). Get this from list_emails or search_emails.',
+          },
+        },
+        required: ['email_id'],
+      },
+    });
+
+    this.registry.registerUniversalTool({
+      name: 'send_email',
+      description: 'Send an email from the primary email account (or specify account_id to use a different account).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          to: {
+            oneOf: [
+              { type: 'string' },
+              { type: 'array', items: { type: 'string' } },
+            ],
+            description: 'Recipient email address(es)',
+          },
+          subject: {
+            type: 'string',
+            description: 'Email subject',
+          },
+          body: {
+            type: 'string',
+            description: 'Email body (plain text)',
+          },
+          cc: {
+            oneOf: [
+              { type: 'string' },
+              { type: 'array', items: { type: 'string' } },
+            ],
+            description: 'CC recipients',
+          },
+          bcc: {
+            oneOf: [
+              { type: 'string' },
+              { type: 'array', items: { type: 'string' } },
+            ],
+            description: 'BCC recipients',
+          },
+          htmlBody: {
+            type: 'string',
+            description: 'Email body (HTML)',
+          },
+          account_id: {
+            type: 'string',
+            description: 'Optional: Virtual account ID (format: account_<id>) to send from. Defaults to primary account.',
+          },
+        },
+        required: ['to', 'subject', 'body'],
+      },
+    });
+
+    this.registry.registerUniversalTool({
+      name: 'search_emails',
+      description: 'Search emails across ALL configured email accounts. Returns aggregated results sorted by timestamp.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Search query string',
+          },
+          max_results: {
+            type: 'number',
+            description: 'Maximum number of results (default: 20)',
+            default: 20,
+          },
+          from: {
+            type: 'string',
+            description: 'Filter by sender email',
+          },
+          to: {
+            type: 'string',
+            description: 'Filter by recipient email',
+          },
+          subject: {
+            type: 'string',
+            description: 'Filter by subject keywords',
+          },
+          hasAttachment: {
+            type: 'boolean',
+            description: 'Filter emails with attachments',
+          },
+        },
+        required: ['query'],
+      },
+    });
   }
 
   /**

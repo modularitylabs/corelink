@@ -133,3 +133,42 @@ export interface EmailStats {
   byProvider: Record<string, number>;
   byAccount: Record<string, number>;
 }
+
+/**
+ * Virtual email for LLM responses
+ * Uses virtual IDs to abstract provider-specific details
+ *
+ * Key differences from Email:
+ * - id: virtual email ID (e.g., "email_abc123xyz") instead of provider-specific ID
+ * - accountId: virtual account ID (e.g., "account_xyz789") instead of real account ID
+ * - NO providerId: Provider abstraction - LLM doesn't need to know provider
+ */
+export interface VirtualEmail {
+  // Virtual IDs (abstracted from provider)
+  id: string; // Virtual email ID
+  accountId: string; // Virtual account ID
+
+  // Email metadata (same as Email)
+  subject: string;
+  from: EmailAddress;
+  to: EmailAddress[];
+  cc?: EmailAddress[];
+  bcc?: EmailAddress[];
+  replyTo?: EmailAddress[];
+
+  // Content (same as Email)
+  body?: string; // Plain text body
+  htmlBody?: string; // HTML body
+  snippet?: string; // First ~200 chars preview
+
+  // Metadata (same as Email)
+  timestamp: number; // Unix timestamp in milliseconds
+  isRead: boolean;
+  isStarred?: boolean;
+  labels?: string[]; // Gmail labels / Outlook categories
+  threadId?: string; // For threading support
+
+  // Attachments (same as Email)
+  hasAttachments: boolean;
+  attachments?: EmailAttachment[];
+}

@@ -5,7 +5,7 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { integer, sqliteTable, text, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
 
 /**
  * Accounts (multi-account support)
@@ -153,3 +153,43 @@ export const activeProviders = sqliteTable('active_providers', {
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
 });
+
+/**
+ * Virtual ID mappings (for service abstraction)
+ * Maps virtual IDs exposed to LLMs to real provider-specific IDs
+ *
+ * Purpose: Complete service abstraction - LLMs never see real IDs
+ * - Virtual email IDs: email_<nanoid> (e.g., email_abc123xyz)
+ * - Virtual account IDs: account_<nanoid> (e.g., account_xyz789)
+ *
+ * Storage: Hybrid (in-memory cache + persistent DB)
+ * Expiration: No expiration (persistent mappings)
+ *
+ * Indices:
+ * - idx_email_reverse: UNIQUE(type, real_account_id, provider_entity_id) for email lookups
+ * - idx_account_reverse: UNIQUE(type, real_account_id) for account lookups
+ * - idx_virtual_type: (virtual_id, type) for forward resolution
+ */
+export const virtualIdMappings = sqliteTable('virtual_id_mappings', {
+  virtualId: text('virtual_id').primaryKey(), // Virtual ID exposed to LLM
+  type: text('type').notNull(), // 'email' | 'account'
+  realAccountId: text('real_account_id').notNull(), // Real account ID in accounts table
+  providerEntityId: text('provider_entity_id'), // Provider-specific email ID (null for account type)
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  // UNIQUE index for reverse email lookup (prevents race conditions)
+  emailReverseIdx: uniqueIndex('idx_email_reverse')
+    .on(table.type, table.realAccountId, table.providerEntityId)
+    .where(sql`${table.type} = 'email' AND ${table.providerEntityId} IS NOT NULL`),
+
+  // UNIQUE index for reverse account lookup (prevents race conditions)
+  accountReverseIdx: uniqueIndex('idx_account_reverse')
+    .on(table.type, table.realAccountId)
+    .where(sql`${table.type} = 'account'`),
+
+  // Index for forward resolution
+  virtualTypeIdx: index('idx_virtual_type')
+    .on(table.virtualId, table.type),
+}));

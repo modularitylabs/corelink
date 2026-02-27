@@ -10,6 +10,9 @@ import * as path from 'path';
 import { initDatabase } from './db/index.js';
 import { CredentialManager } from './services/credential-manager.js';
 import { CoreLinkMCPServer } from './mcp/index.js';
+import { emailService } from './services/email/EmailService.js';
+import { GmailProvider } from './services/email/providers/GmailProvider.js';
+import { OutlookProvider } from './services/email/providers/OutlookProvider.js';
 
 // Load environment variables
 const projectRoot = path.join(process.cwd(), '..', '..');
@@ -26,6 +29,12 @@ async function startMCPServer() {
 
     // Initialize credential manager
     const credentialManager = new CredentialManager(db);
+
+    // Initialize EmailService with providers
+    console.error('[CoreLink MCP] Registering email providers...');
+    emailService.registerProvider('com.corelink.gmail', new GmailProvider());
+    emailService.registerProvider('com.corelink.outlook', new OutlookProvider());
+    console.error('[CoreLink MCP] Email providers registered');
 
     // Create and start MCP server
     const mcpServer = new CoreLinkMCPServer({

@@ -28,6 +28,7 @@ export interface ActionResult {
  * Context provided to plugins during execution
  */
 export interface ExecutionContext {
+  accountId?: string; // Optional account ID for multi-account support
   auth: PluginCredentials;
   settings: Record<string, unknown>;
   logger: (message: string, level?: 'info' | 'warn' | 'error') => void;
