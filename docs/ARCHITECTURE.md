@@ -13,11 +13,12 @@
 3. [Component Details](#component-details)
 4. [Virtual ID Abstraction](#virtual-id-abstraction)
 5. [Multi-Account Architecture](#multi-account-architecture)
-6. [Data Flow](#data-flow)
-7. [Database Schema](#database-schema)
-8. [Security Model](#security-model)
-9. [Plugin System](#plugin-system)
-10. [Technology Stack](#technology-stack)
+6. [Task-Based Execution](#task-based-execution)
+7. [Data Flow](#data-flow)
+8. [Database Schema](#database-schema)
+9. [Security Model](#security-model)
+10. [Plugin System](#plugin-system)
+11. [Technology Stack](#technology-stack)
 
 ---
 
@@ -720,6 +721,100 @@ private getGmailClient(account: Account): gmail_v1.Gmail {
 
 ---
 
+## Task-Based Execution
+
+### Overview
+
+CoreLink implements a **persistent, session-based task queue** to support asynchronous tool execution. This is a **mandatory architectural component**, not an optimization.
+
+### Why Task-Based Architecture?
+
+**Three critical requirements force this design**:
+
+1. **REQUIRE_APPROVAL Policy** - Tasks may wait hours for user approval
+   - Cannot keep HTTP connections open indefinitely
+   - Must persist task state across user interactions
+   - Example: User must approve before sending email to CEO
+
+2. **User Cancellation** - Stop runaway AI agents from UI
+   - Runaway agent sends 5,000 requests
+   - User sees queue in UI and clicks "Cancel All"
+   - Must abort both queued (instant) and in-flight (via AbortController) tasks
+
+3. **Resource Fairness** - Prevent one agent from starving others
+   - Multiple AI agents active simultaneously
+   - Each session gets dedicated worker pool (3 workers)
+   - No monopolization of resources
+
+### Architecture
+
+```
+MCP Session 1 (Claude)     MCP Session 2 (ChatGPT)
+        ↓                          ↓
+   Session Queue 1            Session Queue 2
+   (SQLite table)             (SQLite table)
+        ↓                          ↓
+   Worker Pool 1              Worker Pool 2
+   [W1, W2, W3]               [W1, W2, W3]
+        ↓                          ↓
+   Execute Tasks              Execute Tasks
+   (Gmail/Outlook API)        (Gmail/Outlook API)
+```
+
+### Key Features
+
+- **Persistent Queue**: Tasks stored in SQLite, survive server restarts
+- **Session Isolation**: Each MCP session gets 3 dedicated workers
+- **Hybrid MCP Tasks**: Uses MCP Tasks protocol if client supports it, else synchronous fallback
+- **Cancellation**: Both queued (instant) and running (abort via AbortController)
+- **Task Retention**: Auto-delete completed tasks after 30 days
+- **Policy Integration**: REQUIRE_APPROVAL tasks wait in `pending_approval` state
+
+### Task States
+
+- `queued` - Waiting for worker to claim
+- `pending_approval` - Waiting for user to approve/deny
+- `running` - Worker currently executing
+- `completed` - Successfully finished
+- `failed` - Execution failed (after retries)
+- `cancelled` - User or system cancelled
+
+### Configuration
+
+```typescript
+const WORKERS_PER_SESSION = 3;       // Max concurrent tasks per session
+const TASK_RETENTION_DAYS = 30;      // Auto-delete old tasks
+const TASK_TIMEOUT_MS = 300000;      // 5 minutes max execution time
+const WORKER_POLL_INTERVAL_MS = 1000; // Workers poll queue every 1 second
+```
+
+### MCP Integration Strategy
+
+**If client supports MCP Tasks**:
+- Return task ID immediately
+- Client polls for completion
+- User can cancel before execution
+
+**If client does NOT support MCP Tasks**:
+- Enqueue task but wait for completion
+- HTTP connection stays open
+- Return result when ready
+- **Still cancellable from UI** (aborts worker, returns error)
+
+### Detailed Specification
+
+See **[Task Queue Architecture](./TASK_QUEUE_ARCHITECTURE.md)** for complete specification including:
+- Database schema with indices
+- Worker pool implementation
+- Atomic task claiming
+- Cancellation flows
+- Error handling and retries
+- Performance considerations
+
+**Status**: ⏳ Design complete, implementation pending (Phase 11)
+
+---
+
 ## Data Flow
 
 ### OAuth Connection Flow
@@ -803,6 +898,7 @@ erDiagram
     CREDENTIALS ||--o{ PLUGIN_SETTINGS : "for"
     POLICY_RULES ||--o{ AUDIT_LOGS : "applied by"
     ACTIVE_PROVIDERS ||--|| PLUGIN_SETTINGS : "references"
+    APPROVAL_REQUESTS ||--o{ TASK_QUEUE : "related to"
 
     ACCOUNTS {
         text id PK
@@ -897,6 +993,27 @@ erDiagram
         text plugin_id
         text updated_at
     }
+
+    TASK_QUEUE {
+        text id PK
+        text session_id
+        text tool_name
+        text args
+        text status
+        int priority
+        text worker_id
+        int attempts
+        int max_attempts
+        text created_at
+        text started_at
+        text completed_at
+        text timeout_at
+        text result
+        text error
+        text policy_decision
+        text approval_request_id FK
+        text redacted_fields
+    }
 ```
 
 ### Key Relationships
@@ -907,6 +1024,7 @@ erDiagram
 - **POLICY_RULES** can be global or plugin-specific
 - **AUDIT_LOGS** references the policy rule that was applied
 - **ACTIVE_PROVIDERS** maps categories (email, task) to active plugin
+- **TASK_QUEUE** persistent queue for asynchronous task execution with session isolation
 
 ### New Tables (Phase 5.5)
 
@@ -920,6 +1038,19 @@ erDiagram
 - `type` is 'email' or 'account'
 - `provider_entity_id` is NULL for account mappings
 - UNIQUE indices prevent duplicate mappings and enable fast reverse lookups
+
+### New Tables (Phase 11)
+
+**TASK_QUEUE**: Task-based execution system
+- Persistent queue for asynchronous tool execution
+- Supports REQUIRE_APPROVAL, cancellation, and session isolation
+- `session_id` isolates tasks per MCP session (fairness)
+- `status` tracks lifecycle: queued → running → completed/failed/cancelled
+- `priority` reserved for future prioritization (currently all same priority)
+- `worker_id` identifies which worker claimed the task
+- `approval_request_id` links to APPROVAL_REQUESTS for REQUIRE_APPROVAL policy
+- Auto-deleted after 30 days (completed/failed tasks only)
+- See [Task Queue Architecture](./TASK_QUEUE_ARCHITECTURE.md) for details
 
 ---
 
