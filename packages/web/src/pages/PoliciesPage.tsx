@@ -274,10 +274,10 @@ function PolicyFormModal({ policy, onClose, onSave }: PolicyFormModalProps) {
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
                     >
                       <option value="">None (Global)</option>
-                      <option value="email">📧 Email</option>
-                      <option value="calendar">📅 Calendar</option>
-                      <option value="task">✓ Task</option>
-                      <option value="file">📁 File</option>
+                      <option value="email">Email</option>
+                      <option value="calendar">Calendar</option>
+                      <option value="task">Task</option>
+                      <option value="file">File</option>
                     </select>
                   </div>
 

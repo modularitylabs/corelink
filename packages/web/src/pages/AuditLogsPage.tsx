@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
+import { Activity, CheckCircle, ShieldX, EyeOff, Clock, AlertTriangle } from 'lucide-react';
 import {
   getAuditLogs,
   getAuditStats,
@@ -10,6 +11,7 @@ import {
 import { PolicyBadge } from '../components/PolicyBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { LoadingSpinner } from '../components/LoadingSpinner';
+import { StatCard } from '../components/StatCard';
 
 export function AuditLogsPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -81,37 +83,37 @@ export function AuditLogsPage() {
           <StatCard
             label="Total Requests"
             value={stats.totalRequests}
-            icon="📊"
+            icon={<Activity className="w-6 h-6" />}
             color="bg-purple-100 text-purple-800"
           />
           <StatCard
             label="Allowed"
             value={stats.allowedRequests}
-            icon="✅"
+            icon={<CheckCircle className="w-6 h-6" />}
             color="bg-green-100 text-green-800"
           />
           <StatCard
             label="Blocked"
             value={stats.blockedRequests}
-            icon="🚫"
+            icon={<ShieldX className="w-6 h-6" />}
             color="bg-red-100 text-red-800"
           />
           <StatCard
             label="Redacted"
             value={stats.redactedRequests}
-            icon="🔒"
+            icon={<EyeOff className="w-6 h-6" />}
             color="bg-yellow-100 text-yellow-800"
           />
           <StatCard
             label="Approvals"
             value={stats.approvalRequests}
-            icon="⏳"
+            icon={<Clock className="w-6 h-6" />}
             color="bg-blue-100 text-blue-800"
           />
           <StatCard
             label="Errors"
             value={stats.erroredRequests}
-            icon="⚠️"
+            icon={<AlertTriangle className="w-6 h-6" />}
             color="bg-orange-100 text-orange-800"
           />
         </div>
@@ -128,10 +130,10 @@ export function AuditLogsPage() {
               className="w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500 text-sm"
             >
               <option value="">All Categories</option>
-              <option value="email">📧 Email</option>
-              <option value="calendar">📅 Calendar</option>
-              <option value="task">✓ Task</option>
-              <option value="file">📁 File</option>
+              <option value="email">Email</option>
+              <option value="calendar">Calendar</option>
+              <option value="task">Task</option>
+              <option value="file">File</option>
             </select>
           </div>
 
@@ -289,27 +291,6 @@ export function AuditLogsPage() {
       {selectedLog && (
         <LogDetailsModal log={selectedLog} onClose={() => setSelectedLog(null)} />
       )}
-    </div>
-  );
-}
-
-interface StatCardProps {
-  label: string;
-  value: number;
-  icon: string;
-  color: string;
-}
-
-function StatCard({ label, value, icon, color }: StatCardProps) {
-  return (
-    <div className="bg-white rounded-lg shadow p-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-gray-600">{label}</p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
-        </div>
-        <div className={`text-3xl p-2 rounded-lg ${color}`}>{icon}</div>
-      </div>
     </div>
   );
 }

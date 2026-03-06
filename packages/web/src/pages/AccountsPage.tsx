@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
+import { SiGmail, SiTodoist, SiGooglecalendar } from 'react-icons/si';
+import { MdOutlineEmail, MdChecklist, MdCalendarMonth } from 'react-icons/md';
 import type { Account } from '../api/client';
 import {
   getAccounts,
@@ -222,8 +224,8 @@ export function AccountsPage() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center text-xl">
-              📧
+            <div className="w-10 h-10 bg-red-50 rounded-lg flex items-center justify-center">
+              <SiGmail size={22} style={{ color: '#EA4335' }} />
             </div>
             <div>
               <p className="text-2xl font-bold text-gray-900">{gmailAccounts.length}</p>
@@ -234,8 +236,8 @@ export function AccountsPage() {
 
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-xl">
-              📨
+            <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
+              <MdOutlineEmail size={24} style={{ color: '#0078D4' }} />
             </div>
             <div>
               <p className="text-2xl font-bold text-gray-900">{outlookAccounts.length}</p>
@@ -246,8 +248,8 @@ export function AccountsPage() {
 
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center text-xl">
-              ✓
+            <div className="w-10 h-10 bg-red-50 rounded-lg flex items-center justify-center">
+              <SiTodoist size={22} style={{ color: '#DB4035' }} />
             </div>
             <div>
               <p className="text-2xl font-bold text-gray-900">{todoistAccounts.length}</p>
@@ -258,8 +260,8 @@ export function AccountsPage() {
 
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl">
-              📋
+            <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
+              <MdChecklist size={24} style={{ color: '#0078D4' }} />
             </div>
             <div>
               <p className="text-2xl font-bold text-gray-900">{msTodoAccounts.length}</p>
@@ -270,24 +272,24 @@ export function AccountsPage() {
 
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center text-xl">
-              📅
+            <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
+              <SiGooglecalendar size={22} style={{ color: '#4285F4' }} />
             </div>
             <div>
               <p className="text-2xl font-bold text-gray-900">{googleCalendarAccounts.length}</p>
-              <p className="text-sm text-gray-600">G Calendar</p>
+              <p className="text-sm text-gray-600">Google Calendar</p>
             </div>
           </div>
         </div>
 
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-sky-100 rounded-lg flex items-center justify-center text-xl">
-              🗓️
+            <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
+              <MdCalendarMonth size={24} style={{ color: '#0078D4' }} />
             </div>
             <div>
               <p className="text-2xl font-bold text-gray-900">{outlookCalendarAccounts.length}</p>
-              <p className="text-sm text-gray-600">OL Calendar</p>
+              <p className="text-sm text-gray-600">Outlook Calendar</p>
             </div>
           </div>
         </div>
@@ -299,8 +301,8 @@ export function AccountsPage() {
           <div className="bg-white border border-gray-200 rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center text-2xl">
-                  📧
+                <div className="w-10 h-10 bg-red-50 rounded-lg flex items-center justify-center">
+                  <SiGmail size={22} style={{ color: '#EA4335' }} />
                 </div>
                 <div>
                   <h3 className="font-semibold text-gray-900">Gmail</h3>
@@ -334,8 +336,8 @@ export function AccountsPage() {
           <div className="bg-white border border-gray-200 rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-2xl">
-                  📨
+                <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
+                  <MdOutlineEmail size={24} style={{ color: '#0078D4' }} />
                 </div>
                 <div>
                   <h3 className="font-semibold text-gray-900">Outlook</h3>
@@ -369,8 +371,8 @@ export function AccountsPage() {
           <div className="bg-white border border-gray-200 rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center text-2xl">
-                  ✓
+                <div className="w-10 h-10 bg-red-50 rounded-lg flex items-center justify-center">
+                  <SiTodoist size={22} style={{ color: '#DB4035' }} />
                 </div>
                 <div>
                   <h3 className="font-semibold text-gray-900">Todoist</h3>
@@ -443,8 +445,8 @@ export function AccountsPage() {
           <div className="bg-white border border-gray-200 rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-2xl">
-                  📋
+                <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
+                  <MdChecklist size={24} style={{ color: '#0078D4' }} />
                 </div>
                 <div>
                   <h3 className="font-semibold text-gray-900">Microsoft Todo</h3>
@@ -478,8 +480,8 @@ export function AccountsPage() {
           <div className="bg-white border border-gray-200 rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center text-2xl">
-                  📅
+                <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
+                  <SiGooglecalendar size={22} style={{ color: '#4285F4' }} />
                 </div>
                 <div>
                   <h3 className="font-semibold text-gray-900">Google Calendar</h3>
@@ -513,8 +515,8 @@ export function AccountsPage() {
           <div className="bg-white border border-gray-200 rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-sky-100 rounded-lg flex items-center justify-center text-2xl">
-                  🗓️
+                <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
+                  <MdCalendarMonth size={24} style={{ color: '#0078D4' }} />
                 </div>
                 <div>
                   <h3 className="font-semibold text-gray-900">Outlook Calendar</h3>

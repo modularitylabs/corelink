@@ -1,3 +1,5 @@
+import { Mail, Calendar, CheckSquare, FolderOpen, Globe, Box } from 'lucide-react';
+import type { ReactNode } from 'react';
 import type { PolicyCategory } from '../api/client';
 
 interface CategoryBadgeProps {
@@ -5,12 +7,12 @@ interface CategoryBadgeProps {
   className?: string;
 }
 
-const categoryIcons: Record<string, string> = {
-  email: '📧',
-  calendar: '📅',
-  task: '✓',
-  file: '📁',
-  global: '🌐',
+const categoryIcons: Record<string, ReactNode> = {
+  email: <Mail className="w-3 h-3" />,
+  calendar: <Calendar className="w-3 h-3" />,
+  task: <CheckSquare className="w-3 h-3" />,
+  file: <FolderOpen className="w-3 h-3" />,
+  global: <Globe className="w-3 h-3" />,
 };
 
 const badgeStyles: Record<string, string> = {
@@ -22,14 +24,14 @@ const badgeStyles: Record<string, string> = {
 };
 
 export function CategoryBadge({ category, className = '' }: CategoryBadgeProps) {
-  const icon = categoryIcons[category] || '📦';
+  const icon = categoryIcons[category] ?? <Box className="w-3 h-3" />;
   const style = badgeStyles[category] || 'bg-gray-100 text-gray-800 border-gray-200';
 
   return (
     <span
       className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border ${style} ${className}`}
     >
-      <span>{icon}</span>
+      {icon}
       <span className="capitalize">{category}</span>
     </span>
   );

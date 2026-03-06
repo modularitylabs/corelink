@@ -1,4 +1,8 @@
 import { useState } from 'react';
+import { Box } from 'lucide-react';
+import { SiGmail, SiTodoist, SiGooglecalendar } from 'react-icons/si';
+import { MdOutlineEmail, MdChecklist, MdCalendarMonth } from 'react-icons/md';
+import type { ReactNode } from 'react';
 import type { Account } from '../api/client';
 import { setPrimaryAccount, deleteAccount } from '../api/client';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -8,21 +12,29 @@ interface AccountCardProps {
   onUpdate?: () => void;
 }
 
-const pluginIcons: Record<string, string> = {
-  'com.corelink.gmail': '📧',
-  'com.corelink.outlook': '📨',
+const pluginIcons: Record<string, ReactNode> = {
+  'com.corelink.gmail': <SiGmail size={22} style={{ color: '#EA4335' }} />,
+  'com.corelink.outlook': <MdOutlineEmail size={24} style={{ color: '#0078D4' }} />,
+  'com.corelink.todoist': <SiTodoist size={22} style={{ color: '#DB4035' }} />,
+  'com.corelink.microsoft-todo': <MdChecklist size={24} style={{ color: '#0078D4' }} />,
+  'com.corelink.google-calendar': <SiGooglecalendar size={22} style={{ color: '#4285F4' }} />,
+  'com.corelink.outlook-calendar': <MdCalendarMonth size={24} style={{ color: '#0078D4' }} />,
 };
 
 const pluginColors: Record<string, string> = {
   'com.corelink.gmail': 'border-purple-200 bg-purple-50',
   'com.corelink.outlook': 'border-blue-200 bg-blue-50',
+  'com.corelink.todoist': 'border-red-200 bg-red-50',
+  'com.corelink.microsoft-todo': 'border-indigo-200 bg-indigo-50',
+  'com.corelink.google-calendar': 'border-green-200 bg-green-50',
+  'com.corelink.outlook-calendar': 'border-sky-200 bg-sky-50',
 };
 
 export function AccountCard({ account, onUpdate }: AccountCardProps) {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const icon = pluginIcons[account.pluginId] || '📧';
+  const icon = pluginIcons[account.pluginId] ?? <Box className="w-6 h-6" />;
   const colorClass = pluginColors[account.pluginId] || 'border-gray-200 bg-gray-50';
 
   const handleSetPrimary = async () => {
@@ -59,7 +71,7 @@ export function AccountCard({ account, onUpdate }: AccountCardProps) {
       <div className={`border rounded-lg p-4 ${colorClass}`}>
         <div className="flex items-start justify-between">
           <div className="flex items-start gap-3 flex-1">
-            <div className="text-3xl">{icon}</div>
+            <div className="text-gray-600">{icon}</div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold text-gray-900 truncate">

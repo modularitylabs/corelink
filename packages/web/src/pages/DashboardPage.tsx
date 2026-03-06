@@ -1,358 +1,361 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import type { Account } from '../api/client';
+import { Activity, CheckCircle, ShieldX, Clock } from 'lucide-react';
+import { SiGmail, SiTodoist, SiGooglecalendar } from 'react-icons/si';
+import { MdOutlineEmail, MdChecklist, MdCalendarMonth } from 'react-icons/md';
 import {
-  getGmailStatus,
-  getOutlookStatus,
-  getTodoistStatus,
-  getMicrosoftTodoStatus,
-  startGmailOAuth,
-  startOutlookOAuth,
-  connectTodoist,
-  startMicrosoftTodoOAuth,
+  getAuditStats,
+  getRecentActivity,
+  getApprovalRequests,
+  getAccounts,
+  approveRequest,
+  denyRequest,
+  type AuditStats,
+  type AuditLog,
+  type ApprovalRequest,
+  type Account,
 } from '../api/client';
-import { AccountCard } from '../components/AccountCard';
+import { PolicyBadge } from '../components/PolicyBadge';
+import { CategoryBadge } from '../components/CategoryBadge';
+import { LoadingSpinner } from '../components/LoadingSpinner';
+import { StatCard } from '../components/StatCard';
+import { ApprovalModal } from '../components/ApprovalModal';
+
+// ===== Helper =====
+
+function formatRelativeTime(dateStr: string): string {
+  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+// ===== Provider tile config =====
+
+const PROVIDERS = [
+  { id: 'com.corelink.gmail', label: 'Gmail', icon: <SiGmail size={24} style={{ color: '#EA4335' }} /> },
+  { id: 'com.corelink.outlook', label: 'Outlook', icon: <MdOutlineEmail size={26} style={{ color: '#0078D4' }} /> },
+  { id: 'com.corelink.todoist', label: 'Todoist', icon: <SiTodoist size={24} style={{ color: '#DB4035' }} /> },
+  { id: 'com.corelink.microsoft-todo', label: 'MS Todo', icon: <MdChecklist size={26} style={{ color: '#0078D4' }} /> },
+  { id: 'com.corelink.google-calendar', label: 'Google Calendar', icon: <SiGooglecalendar size={24} style={{ color: '#4285F4' }} /> },
+  { id: 'com.corelink.outlook-calendar', label: 'Outlook Calendar', icon: <MdCalendarMonth size={26} style={{ color: '#0078D4' }} /> },
+];
+
+// ===== Main Page =====
 
 export function DashboardPage() {
-  const [gmailAccounts, setGmailAccounts] = useState<Account[]>([]);
-  const [outlookAccounts, setOutlookAccounts] = useState<Account[]>([]);
-  const [todoistAccounts, setTodoistAccounts] = useState<Account[]>([]);
-  const [msTodoAccounts, setMsTodoAccounts] = useState<Account[]>([]);
+  const [stats, setStats] = useState<AuditStats | null>(null);
+  const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
+  const [recentLogs, setRecentLogs] = useState<AuditLog[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showTodoistForm, setShowTodoistForm] = useState(false);
-  const [todoistToken, setTodoistToken] = useState('');
-  const [todoistConnecting, setTodoistConnecting] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [selectedApproval, setSelectedApproval] = useState<ApprovalRequest | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  useEffect(() => {
-    checkStatus();
-  }, []);
-
-  async function checkStatus() {
+  async function loadDashboard(silent = false) {
     try {
-      const [gmailData, outlookData, todoistData, msTodoData] = await Promise.all([
-        getGmailStatus(),
-        getOutlookStatus(),
-        getTodoistStatus(),
-        getMicrosoftTodoStatus(),
+      const [statsData, approvalsData, logsData, accountsData] = await Promise.all([
+        getAuditStats({}),
+        getApprovalRequests(),
+        getRecentActivity(8),
+        getAccounts(),
       ]);
-
-      setGmailAccounts(gmailData.accounts || []);
-      setOutlookAccounts(outlookData.accounts || []);
-      setTodoistAccounts(todoistData.accounts || []);
-      setMsTodoAccounts(msTodoData.accounts || []);
+      setStats(statsData);
+      setPendingApprovals(approvalsData.filter((r) => r.status === 'pending'));
+      setRecentLogs(logsData);
+      setAccounts(accountsData);
+      setLastRefreshed(new Date());
     } catch (error) {
-      toast.error('Failed to check connection status');
-      console.error('Failed to check connection status:', error);
+      if (!silent) toast.error('Failed to load dashboard');
+      console.error(error);
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleConnectGmail() {
+  useEffect(() => {
+    loadDashboard();
+    const interval = setInterval(() => loadDashboard(true), 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  async function handleApprove(id: string, approvedArgs?: Record<string, unknown>) {
+    setActionLoading(id);
     try {
-      const data = await startGmailOAuth();
-      if (data.authUrl) {
-        window.open(data.authUrl, '_blank', 'width=600,height=700');
-
-        const initialCount = gmailAccounts.length;
-        const interval = setInterval(async () => {
-          const statusData = await getGmailStatus();
-          if (statusData.accounts && statusData.accounts.length > initialCount) {
-            setGmailAccounts(statusData.accounts);
-            clearInterval(interval);
-            toast.success('Gmail account connected successfully');
-          }
-        }, 2000);
-
-        setTimeout(() => clearInterval(interval), 120000);
-      } else {
-        toast.error('Failed to get authorization URL');
-      }
+      await approveRequest(id, approvedArgs);
+      setPendingApprovals((prev) => prev.filter((r) => r.id !== id));
+      setSelectedApproval(null);
+      toast.success('Request approved');
     } catch (error) {
-      toast.error('Failed to connect Gmail');
-      console.error('Failed to start Gmail OAuth:', error);
-    }
-  }
-
-  async function handleConnectOutlook() {
-    try {
-      const data = await startOutlookOAuth();
-      if (data.authUrl) {
-        window.open(data.authUrl, '_blank', 'width=600,height=700');
-
-        const initialCount = outlookAccounts.length;
-        const interval = setInterval(async () => {
-          const statusData = await getOutlookStatus();
-          if (statusData.accounts && statusData.accounts.length > initialCount) {
-            setOutlookAccounts(statusData.accounts);
-            clearInterval(interval);
-            toast.success('Outlook account connected successfully');
-          }
-        }, 2000);
-
-        setTimeout(() => clearInterval(interval), 120000);
-      } else {
-        toast.error('Failed to get authorization URL');
-      }
-    } catch (error) {
-      toast.error('Failed to connect Outlook');
-      console.error('Failed to start Outlook OAuth:', error);
-    }
-  }
-
-  async function handleConnectTodoist() {
-    if (!todoistToken.trim()) {
-      toast.error('Please enter your Todoist API token');
-      return;
-    }
-    setTodoistConnecting(true);
-    try {
-      await connectTodoist(todoistToken.trim());
-      const statusData = await getTodoistStatus();
-      setTodoistAccounts(statusData.accounts || []);
-      setShowTodoistForm(false);
-      setTodoistToken('');
-      toast.success('Todoist account connected successfully');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to connect Todoist');
+      toast.error('Failed to approve request');
+      console.error(error);
     } finally {
-      setTodoistConnecting(false);
+      setActionLoading(null);
     }
   }
 
-  async function handleConnectMicrosoftTodo() {
+  async function handleDeny(id: string) {
+    setActionLoading(id);
     try {
-      const data = await startMicrosoftTodoOAuth();
-      if (data.authUrl) {
-        window.open(data.authUrl, '_blank', 'width=600,height=700');
-
-        const initialCount = msTodoAccounts.length;
-        const interval = setInterval(async () => {
-          const statusData = await getMicrosoftTodoStatus();
-          if (statusData.accounts && statusData.accounts.length > initialCount) {
-            setMsTodoAccounts(statusData.accounts);
-            clearInterval(interval);
-            toast.success('Microsoft Todo account connected successfully');
-          }
-        }, 2000);
-
-        setTimeout(() => clearInterval(interval), 120000);
-      } else {
-        toast.error('Failed to get authorization URL');
-      }
+      await denyRequest(id);
+      setPendingApprovals((prev) => prev.filter((r) => r.id !== id));
+      setSelectedApproval(null);
+      toast.success('Request denied');
     } catch (error) {
-      toast.error('Failed to connect Microsoft Todo');
-      console.error('Failed to start Microsoft Todo OAuth:', error);
+      toast.error('Failed to deny request');
+      console.error(error);
+    } finally {
+      setActionLoading(null);
     }
   }
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-600">Loading...</div>
+        <LoadingSpinner size="lg" />
       </div>
     );
   }
 
+  const visibleApprovals = pendingApprovals.slice(0, 5);
+  const extraApprovals = pendingApprovals.length - visibleApprovals.length;
+  const accountCountByPlugin = accounts.reduce<Record<string, number>>((acc, a) => {
+    acc[a.pluginId] = (acc[a.pluginId] ?? 0) + 1;
+    return acc;
+  }, {});
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Manage your connected services and view system status
-        </p>
-      </div>
-
-      <div className="space-y-6">
-        {/* Gmail Section */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center text-2xl">
-                📧
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">Gmail</h3>
-                <p className="text-xs text-gray-500">
-                  {gmailAccounts.length > 0
-                    ? `${gmailAccounts.length} account${gmailAccounts.length > 1 ? 's' : ''} connected`
-                    : 'Not connected'}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={handleConnectGmail}
-              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition shadow-sm"
-            >
-              {gmailAccounts.length > 0 ? 'Add Another Account' : 'Connect Gmail'}
-            </button>
-          </div>
-
-          {gmailAccounts.length > 0 && (
-            <div className="space-y-2">
-              {gmailAccounts.map((account) => (
-                <AccountCard key={account.id} account={account} onUpdate={checkStatus} />
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Outlook Section */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-2xl">
-                📨
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">Outlook</h3>
-                <p className="text-xs text-gray-500">
-                  {outlookAccounts.length > 0
-                    ? `${outlookAccounts.length} account${outlookAccounts.length > 1 ? 's' : ''} connected`
-                    : 'Not connected'}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={handleConnectOutlook}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition shadow-sm"
-            >
-              {outlookAccounts.length > 0 ? 'Add Another Account' : 'Connect Outlook'}
-            </button>
-          </div>
-
-          {outlookAccounts.length > 0 && (
-            <div className="space-y-2">
-              {outlookAccounts.map((account) => (
-                <AccountCard key={account.id} account={account} onUpdate={checkStatus} />
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Todoist Section */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center text-2xl">
-                ✓
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">Todoist</h3>
-                <p className="text-xs text-gray-500">
-                  {todoistAccounts.length > 0
-                    ? `${todoistAccounts.length} account${todoistAccounts.length > 1 ? 's' : ''} connected`
-                    : 'Not connected'}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setShowTodoistForm(v => !v)}
-              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition shadow-sm"
-            >
-              {todoistAccounts.length > 0 ? 'Add Another Account' : 'Connect Todoist'}
-            </button>
-          </div>
-
-          {showTodoistForm && (
-            <div className="border border-gray-200 rounded-lg p-4 space-y-3 bg-gray-50">
-              <p className="text-sm text-gray-600">
-                Get your API token from{' '}
-                <a
-                  href="https://app.todoist.com/app/settings/integrations/developer"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-red-600 hover:underline"
-                >
-                  Todoist Settings → Integrations → Developer
-                </a>
-              </p>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  value={todoistToken}
-                  onChange={e => setTodoistToken(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleConnectTodoist()}
-                  placeholder="Paste your API token..."
-                  className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500"
-                />
-                <button
-                  onClick={handleConnectTodoist}
-                  disabled={todoistConnecting}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition"
-                >
-                  {todoistConnecting ? 'Connecting...' : 'Connect'}
-                </button>
-                <button
-                  onClick={() => { setShowTodoistForm(false); setTodoistToken(''); }}
-                  className="px-3 py-2 text-gray-500 hover:text-gray-700 text-sm rounded-lg transition"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-
-          {todoistAccounts.length > 0 && (
-            <div className="space-y-2">
-              {todoistAccounts.map((account) => (
-                <AccountCard key={account.id} account={account} onUpdate={checkStatus} />
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Microsoft Todo Section */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-2xl">
-                📋
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">Microsoft Todo</h3>
-                <p className="text-xs text-gray-500">
-                  {msTodoAccounts.length > 0
-                    ? `${msTodoAccounts.length} account${msTodoAccounts.length > 1 ? 's' : ''} connected`
-                    : 'Not connected'}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={handleConnectMicrosoftTodo}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition shadow-sm"
-            >
-              {msTodoAccounts.length > 0 ? 'Add Another Account' : 'Connect Microsoft Todo'}
-            </button>
-          </div>
-
-          {msTodoAccounts.length > 0 && (
-            <div className="space-y-2">
-              {msTodoAccounts.map((account) => (
-                <AccountCard key={account.id} account={account} onUpdate={checkStatus} />
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Info Box */}
-      <div className="bg-purple-50 border border-purple-200 rounded-lg p-6">
-        <h3 className="font-semibold text-purple-900 mb-2">Getting Started</h3>
-        <ol className="text-sm space-y-2 text-purple-800">
-          <li>1. Connect your Gmail or Outlook account above</li>
-          <li>2. Connect Todoist or Microsoft Todo for task management</li>
-          <li>3. Configure access policies in the Policies tab</li>
-          <li>4. Connect your AI agent via MCP protocol</li>
-          <li>5. Monitor all activity in the Audit Logs tab</li>
-        </ol>
-        <div className="mt-4 pt-4 border-t border-purple-200">
-          <p className="text-sm text-purple-700">
-            <strong>Multi-Account Support:</strong> You can connect multiple accounts per provider.
-            AI agents can access all connected accounts based on your policies!
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            {lastRefreshed
+              ? `Last updated ${formatRelativeTime(lastRefreshed.toISOString())}`
+              : 'Loading...'}
           </p>
         </div>
+        <button
+          onClick={() => loadDashboard(false)}
+          className="px-4 py-2 bg-white border border-gray-300 text-sm font-medium text-gray-700 rounded-lg hover:bg-gray-50 shadow-sm transition"
+        >
+          Refresh
+        </button>
       </div>
+
+      {/* Section A: Stats Row */}
+      {stats && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard
+            label="Total Requests"
+            value={stats.totalRequests}
+            icon={<Activity className="w-6 h-6" />}
+            color="bg-purple-100 text-purple-800"
+          />
+          <StatCard
+            label="Allowed"
+            value={stats.allowedRequests}
+            icon={<CheckCircle className="w-6 h-6" />}
+            color="bg-green-100 text-green-800"
+          />
+          <StatCard
+            label="Blocked"
+            value={stats.blockedRequests}
+            icon={<ShieldX className="w-6 h-6" />}
+            color="bg-red-100 text-red-800"
+          />
+          <StatCard
+            label="Pending Approvals"
+            value={pendingApprovals.length}
+            icon={<Clock className="w-6 h-6" />}
+            color="bg-amber-100 text-amber-800"
+          />
+        </div>
+      )}
+
+      {/* Section B: Pending Approvals */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900">Pending Approvals</h2>
+          {pendingApprovals.length > 0 && (
+            <Link
+              to="/approvals"
+              className="text-sm text-purple-600 hover:text-purple-700 font-medium"
+            >
+              View all →
+            </Link>
+          )}
+        </div>
+
+        {pendingApprovals.length === 0 ? (
+          <div className="bg-green-50 border border-green-200 rounded-lg px-5 py-4 flex items-center gap-3">
+            <CheckCircle className="w-5 h-5 text-green-600" />
+            <p className="text-sm font-medium text-green-800">
+              No pending approvals — all clear
+            </p>
+          </div>
+        ) : (
+          <div className="border border-amber-200 rounded-lg overflow-hidden bg-white">
+            <div className="divide-y divide-gray-100">
+              {visibleApprovals.map((req) => (
+                <div key={req.id} className="px-5 py-3 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-gray-900">{req.tool}</span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                        {req.pluginId}
+                      </span>
+                      <span className="text-xs text-gray-500">by {req.agentName}</span>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {formatRelativeTime(req.requestedAt)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => setSelectedApproval(req)}
+                      className="px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 border border-purple-200 rounded hover:bg-purple-100 transition"
+                    >
+                      Review
+                    </button>
+                    <button
+                      onClick={() => handleApprove(req.id)}
+                      disabled={actionLoading === req.id}
+                      className="px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded hover:bg-green-100 disabled:opacity-50 transition"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => handleDeny(req.id)}
+                      disabled={actionLoading === req.id}
+                      className="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded hover:bg-red-100 disabled:opacity-50 transition"
+                    >
+                      Deny
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {extraApprovals > 0 && (
+              <div className="px-5 py-3 bg-amber-50 border-t border-amber-200">
+                <Link
+                  to="/approvals"
+                  className="text-sm text-amber-700 font-medium hover:text-amber-800"
+                >
+                  +{extraApprovals} more pending — view all →
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Section C: Recent Activity */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900">Recent Activity</h2>
+          <Link
+            to="/audit"
+            className="text-sm text-purple-600 hover:text-purple-700 font-medium"
+          >
+            View all →
+          </Link>
+        </div>
+
+        <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+          {recentLogs.length === 0 ? (
+            <div className="text-center py-10">
+              <p className="text-gray-500 text-sm">No activity yet</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Time
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Tool
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Category
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Decision
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-100">
+                  {recentLogs.map((log) => (
+                    <tr key={log.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                        {formatRelativeTime(log.timestamp)}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {log.tool}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {log.category ? (
+                          <CategoryBadge category={log.category} />
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <PolicyBadge action={log.policyDecision.action} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Section D: Connected Accounts */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900">Connected Accounts</h2>
+          <Link
+            to="/accounts"
+            className="text-sm text-purple-600 hover:text-purple-700 font-medium"
+          >
+            Manage →
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+          {PROVIDERS.map((provider) => {
+            const count = accountCountByPlugin[provider.id] ?? 0;
+            return (
+              <div
+                key={provider.id}
+                className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 flex flex-col items-center gap-1 text-center"
+              >
+                <div className="text-gray-600">{provider.icon}</div>
+                <span className="text-lg font-bold text-gray-900">{count}</span>
+                <span className="text-xs text-gray-500 leading-tight">{provider.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ApprovalModal */}
+      {selectedApproval && (
+        <ApprovalModal
+          request={selectedApproval}
+          onApprove={handleApprove}
+          onDeny={handleDeny}
+          onClose={() => setSelectedApproval(null)}
+        />
+      )}
     </div>
   );
 }
