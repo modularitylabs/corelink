@@ -32,7 +32,8 @@ export class TodoistProvider implements ITaskProvider {
       throw new Error(`Todoist listTasks failed: ${response.status} ${await response.text()}`);
     }
 
-    const tasks = (await response.json()) as any[];
+    const body = await response.json() as any;
+    const tasks: any[] = Array.isArray(body) ? body : (body.items ?? body.results ?? body.tasks ?? []);
     const maxResults = args.max_results || 20;
     return tasks.slice(0, maxResults).map(t => this.normalize(t, account));
   }
