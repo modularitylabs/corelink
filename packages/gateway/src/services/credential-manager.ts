@@ -35,10 +35,22 @@ export class CredentialManager {
     displayName?: string,
     metadata?: Record<string, unknown>
   ): Promise<string> {
-    const id = randomUUID();
-
-    // Check if this is the first account for this plugin
+    // Check if an account with this email already exists for this plugin
     const existingAccounts = await this.listAccounts(pluginId);
+    const duplicate = existingAccounts.find(a => a.email === email);
+    if (duplicate) {
+      // Update display name / metadata if they changed, then return existing ID
+      await this.updateAccount(duplicate.id, {
+        ...(displayName !== undefined && { displayName }),
+        ...(metadata !== undefined && { metadata }),
+      });
+      console.log(
+        `[CredentialManager] Account already exists: ${email} for ${pluginId} (id: ${duplicate.id})`
+      );
+      return duplicate.id;
+    }
+
+    const id = randomUUID();
     const isPrimary = existingAccounts.length === 0; // First account is primary
 
     await this.db.insert(schema.accounts).values({
@@ -231,8 +243,26 @@ export class CredentialManager {
       throw new Error(`Account not found: ${accountId}`);
     }
 
-    const id = randomUUID();
     const encryptedData = encryptCredentials(data);
+
+    // Check if credentials already exist for this account and update instead of inserting
+    const existing = await this.db
+      .select()
+      .from(schema.credentials)
+      .where(eq(schema.credentials.accountId, accountId))
+      .limit(1);
+
+    if (existing.length > 0) {
+      await this.db
+        .update(schema.credentials)
+        .set({ encryptedData, updatedAt: new Date().toISOString() })
+        .where(eq(schema.credentials.accountId, accountId));
+
+      console.log(`[CredentialManager] Updated credentials for account: ${account.email}`);
+      return existing[0].id;
+    }
+
+    const id = randomUUID();
 
     await this.db.insert(schema.credentials).values({
       id,

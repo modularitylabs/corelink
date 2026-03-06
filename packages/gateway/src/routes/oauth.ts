@@ -51,7 +51,7 @@ export async function oauthRoutes(
         'https://www.googleapis.com/auth/userinfo.email', // Required for userinfo API
         'https://www.googleapis.com/auth/userinfo.profile', // Required for userinfo API
       ],
-      prompt: 'consent', // Force consent to get refresh token
+      prompt: 'select_account consent', // Force account picker, then consent
       state, // Anti-CSRF token
       // PKCE parameters
       // @ts-ignore - googleapis types don't include PKCE yet

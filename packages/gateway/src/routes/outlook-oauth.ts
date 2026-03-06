@@ -58,7 +58,7 @@ export async function outlookOAuthRoutes(
       state,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
-      prompt: 'consent', // Force consent to get refresh token
+      prompt: 'select_account', // Force account picker each time
     });
 
     const authUrl = `${MICROSOFT_AUTH_ENDPOINT}?${params.toString()}`;
