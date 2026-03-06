@@ -423,3 +423,37 @@ export async function disconnectMicrosoftTodo(): Promise<void> {
   const response = await fetch(`${API_URL}/oauth/microsoft-todo`, { method: 'DELETE' });
   if (!response.ok) throw new Error('Failed to disconnect Microsoft Todo');
 }
+
+export async function startGoogleCalendarOAuth(): Promise<{ authUrl: string }> {
+  const response = await fetch(`${API_URL}/oauth/google-calendar/start`);
+  if (!response.ok) throw new Error('Failed to start Google Calendar OAuth');
+  return response.json();
+}
+
+export async function getGoogleCalendarStatus(): Promise<{ accounts: Account[] }> {
+  const response = await fetch(`${API_URL}/oauth/google-calendar/status`);
+  if (!response.ok) throw new Error('Failed to fetch Google Calendar status');
+  return response.json();
+}
+
+export async function disconnectGoogleCalendar(): Promise<void> {
+  const response = await fetch(`${API_URL}/oauth/google-calendar`, { method: 'DELETE' });
+  if (!response.ok) throw new Error('Failed to disconnect Google Calendar');
+}
+
+export async function startOutlookCalendarOAuth(): Promise<{ authUrl: string }> {
+  const response = await fetch(`${API_URL}/oauth/outlook-calendar/start`);
+  if (!response.ok) throw new Error('Failed to start Outlook Calendar OAuth');
+  return response.json();
+}
+
+export async function getOutlookCalendarStatus(): Promise<{ accounts: Account[] }> {
+  const response = await fetch(`${API_URL}/oauth/outlook-calendar/status`);
+  if (!response.ok) throw new Error('Failed to fetch Outlook Calendar status');
+  return response.json();
+}
+
+export async function disconnectOutlookCalendar(): Promise<void> {
+  const response = await fetch(`${API_URL}/oauth/outlook-calendar`, { method: 'DELETE' });
+  if (!response.ok) throw new Error('Failed to disconnect Outlook Calendar');
+}

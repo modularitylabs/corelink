@@ -32,6 +32,7 @@ export const STANDARD_TOOLS = {
   CALENDAR_CREATE_EVENT: 'create_calendar_event',
   CALENDAR_LIST_EVENTS: 'list_calendar_events',
   CALENDAR_UPDATE_EVENT: 'update_calendar_event',
+  CALENDAR_DELETE_EVENT: 'delete_calendar_event',
 
   // Notes
   NOTE_CREATE: 'create_note',

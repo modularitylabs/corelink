@@ -1,0 +1,22 @@
+{
+  "name": "@corelink/plugin-outlook-calendar",
+  "version": "0.1.0",
+  "description": "CoreLink Outlook Calendar Plugin",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "tsc --build --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["corelink", "plugin", "outlook-calendar", "calendar"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@corelink/core": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3"
+  }
+}

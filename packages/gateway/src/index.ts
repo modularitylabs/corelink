@@ -45,6 +45,12 @@ import { MicrosoftTodoProvider } from './services/task/providers/MicrosoftTodoPr
 import { UniversalTaskRouter } from './services/task/UniversalTaskRouter.js';
 import { todoistOAuthRoutes } from './routes/todoist.js';
 import { microsoftTodoOAuthRoutes } from './routes/microsoft-todo-oauth.js';
+import { calendarService } from './services/calendar/CalendarService.js';
+import { GoogleCalendarProvider } from './services/calendar/providers/GoogleCalendarProvider.js';
+import { OutlookCalendarProvider } from './services/calendar/providers/OutlookCalendarProvider.js';
+import { UniversalCalendarRouter } from './services/calendar/UniversalCalendarRouter.js';
+import { googleCalendarOAuthRoutes } from './routes/google-calendar-oauth.js';
+import { outlookCalendarOAuthRoutes } from './routes/outlook-calendar-oauth.js';
 import { SessionTaskManager } from './services/task-queue/index.js';
 import type { ToolExecutor, TaskExecutionContext } from './services/task-queue/types.js';
 import { taskRoutes } from './routes/tasks.js';
@@ -53,7 +59,7 @@ import { auditLogger } from './services/audit-logger.js';
 import { TaskCleanupService } from './services/task-cleanup.js';
 import { JobScheduler } from './jobs/scheduler.js';
 
-const PORT = parseInt(process.env.PORT || '3000', 10);
+const PORT = parseInt(process.env.PORT || '3747', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 
 /**
@@ -158,6 +164,16 @@ async function start() {
   const taskRouter = new UniversalTaskRouter(credentialManager);
   console.log('[CoreLink HTTP] UniversalTaskRouter initialized');
 
+  // Initialize CalendarService with providers
+  console.log('[CoreLink HTTP] Registering calendar providers...');
+  calendarService.registerProvider('com.corelink.google-calendar', new GoogleCalendarProvider());
+  calendarService.registerProvider('com.corelink.outlook-calendar', new OutlookCalendarProvider());
+  console.log('[CoreLink HTTP] Calendar providers registered');
+
+  // Initialize UniversalCalendarRouter
+  const calendarRouter = new UniversalCalendarRouter(credentialManager);
+  console.log('[CoreLink HTTP] UniversalCalendarRouter initialized');
+
   // Initialize plugin registry (still used for tool schema definitions)
   const pluginRegistry = new PluginRegistry(db);
   await pluginRegistry.loadPlugins();
@@ -188,6 +204,14 @@ async function start() {
           return (await taskRouter.updateTask(args)).data;
         case 'complete_task':
           return (await taskRouter.completeTask(args)).data;
+        case 'list_calendar_events':
+          return (await calendarRouter.listEvents(args)).data;
+        case 'create_calendar_event':
+          return (await calendarRouter.createEvent(args)).data;
+        case 'update_calendar_event':
+          return (await calendarRouter.updateEvent(args)).data;
+        case 'delete_calendar_event':
+          return (await calendarRouter.deleteEvent(args)).data;
         default:
           throw new Error(`Unknown tool: ${toolName}`);
       }
@@ -610,6 +634,73 @@ async function start() {
       }
     );
 
+    // Register universal calendar tools
+    server.registerTool(
+      'list_calendar_events',
+      {
+        description: 'List calendar events from ALL connected calendar accounts (Google Calendar, Outlook Calendar, etc.). Aggregates and sorts by start time.',
+        inputSchema: z.object({
+          calendar_id: z.string().optional(),
+          start_date: z.string().optional(),
+          end_date: z.string().optional(),
+          max_results: z.number().optional(),
+          query: z.string().optional(),
+        }),
+      },
+      async (args: any): Promise<CallToolResult> => {
+        return executeThroughQueue('list_calendar_events', args);
+      }
+    );
+
+    server.registerTool(
+      'create_calendar_event',
+      {
+        description: 'Create a new calendar event in the primary calendar account.',
+        inputSchema: z.object({
+          title: z.string(),
+          start_time: z.string(),
+          end_time: z.string(),
+          description: z.string().optional(),
+          attendees: z.array(z.string()).optional(),
+          calendar_id: z.string().optional(),
+        }),
+      },
+      async (args: any): Promise<CallToolResult> => {
+        return executeThroughQueue('create_calendar_event', args);
+      }
+    );
+
+    server.registerTool(
+      'update_calendar_event',
+      {
+        description: 'Update an existing calendar event in the primary calendar account.',
+        inputSchema: z.object({
+          event_id: z.string(),
+          title: z.string().optional(),
+          start_time: z.string().optional(),
+          end_time: z.string().optional(),
+          description: z.string().optional(),
+          attendees: z.array(z.string()).optional(),
+        }),
+      },
+      async (args: any): Promise<CallToolResult> => {
+        return executeThroughQueue('update_calendar_event', args);
+      }
+    );
+
+    server.registerTool(
+      'delete_calendar_event',
+      {
+        description: 'Delete a calendar event from the primary calendar account.',
+        inputSchema: z.object({
+          event_id: z.string(),
+        }),
+      },
+      async (args: any): Promise<CallToolResult> => {
+        return executeThroughQueue('delete_calendar_event', args);
+      }
+    );
+
     return server;
   };
 
@@ -649,7 +740,7 @@ async function start() {
         enabled: true,
         sessions: mcpSessionManager.getSessionCount(),
         plugins: pluginRegistry.getPluginCount(),
-        tools: 8, // 4 email tools + 4 task tools
+        tools: 12, // 4 email tools + 4 task tools + 4 calendar tools
       },
     };
   });
@@ -660,6 +751,8 @@ async function start() {
     await outlookOAuthRoutes(instance, credentialManager);
     await todoistOAuthRoutes(instance, credentialManager);
     await microsoftTodoOAuthRoutes(instance, credentialManager);
+    await googleCalendarOAuthRoutes(instance, credentialManager);
+    await outlookCalendarOAuthRoutes(instance, credentialManager);
   });
 
   // Register account management routes
@@ -717,6 +810,7 @@ async function start() {
 ║   - Plugins loaded: ${pluginRegistry.getPluginCount()}                           ║
 ║   - Universal email tools: 4                      ║
 ║   - Universal task tools: 4                       ║
+║   - Universal calendar tools: 4                   ║
 ║                                                   ║
 ║   Next steps:                                     ║
 ║   1. Start web UI: npm run dev -w @corelink/web   ║

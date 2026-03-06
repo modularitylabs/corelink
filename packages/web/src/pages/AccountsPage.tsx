@@ -10,6 +10,10 @@ import {
   getGmailStatus,
   getOutlookStatus,
   getMicrosoftTodoStatus,
+  startGoogleCalendarOAuth,
+  getGoogleCalendarStatus,
+  startOutlookCalendarOAuth,
+  getOutlookCalendarStatus,
 } from '../api/client';
 import { AccountCard } from '../components/AccountCard';
 import { LoadingSpinner } from '../components/LoadingSpinner';
@@ -129,6 +133,54 @@ export function AccountsPage() {
     }
   }
 
+  async function handleConnectGoogleCalendar() {
+    try {
+      const data = await startGoogleCalendarOAuth();
+      if (data.authUrl) {
+        window.open(data.authUrl, '_blank', 'width=600,height=700');
+
+        const initialCount = accounts.filter((a) => a.pluginId === 'com.corelink.google-calendar').length;
+        const interval = setInterval(async () => {
+          const statusData = await getGoogleCalendarStatus();
+          if (statusData.accounts && statusData.accounts.length > initialCount) {
+            await loadAccounts();
+            clearInterval(interval);
+            toast.success('Google Calendar account connected successfully');
+          }
+        }, 2000);
+
+        setTimeout(() => clearInterval(interval), 120000);
+      }
+    } catch (error) {
+      toast.error('Failed to connect Google Calendar');
+      console.error(error);
+    }
+  }
+
+  async function handleConnectOutlookCalendar() {
+    try {
+      const data = await startOutlookCalendarOAuth();
+      if (data.authUrl) {
+        window.open(data.authUrl, '_blank', 'width=600,height=700');
+
+        const initialCount = accounts.filter((a) => a.pluginId === 'com.corelink.outlook-calendar').length;
+        const interval = setInterval(async () => {
+          const statusData = await getOutlookCalendarStatus();
+          if (statusData.accounts && statusData.accounts.length > initialCount) {
+            await loadAccounts();
+            clearInterval(interval);
+            toast.success('Outlook Calendar account connected successfully');
+          }
+        }, 2000);
+
+        setTimeout(() => clearInterval(interval), 120000);
+      }
+    } catch (error) {
+      toast.error('Failed to connect Outlook Calendar');
+      console.error(error);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -141,6 +193,8 @@ export function AccountsPage() {
   const outlookAccounts = accounts.filter((a) => a.pluginId === 'com.corelink.outlook');
   const todoistAccounts = accounts.filter((a) => a.pluginId === 'com.corelink.todoist');
   const msTodoAccounts = accounts.filter((a) => a.pluginId === 'com.corelink.microsoft-todo');
+  const googleCalendarAccounts = accounts.filter((a) => a.pluginId === 'com.corelink.google-calendar');
+  const outlookCalendarAccounts = accounts.filter((a) => a.pluginId === 'com.corelink.outlook-calendar');
 
   return (
     <div className="space-y-6">
@@ -165,7 +219,7 @@ export function AccountsPage() {
       </div>
 
       {/* Stats Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center text-xl">
@@ -210,6 +264,30 @@ export function AccountsPage() {
             <div>
               <p className="text-2xl font-bold text-gray-900">{msTodoAccounts.length}</p>
               <p className="text-sm text-gray-600">MS Todo</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center text-xl">
+              📅
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-900">{googleCalendarAccounts.length}</p>
+              <p className="text-sm text-gray-600">G Calendar</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-sky-100 rounded-lg flex items-center justify-center text-xl">
+              🗓️
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-900">{outlookCalendarAccounts.length}</p>
+              <p className="text-sm text-gray-600">OL Calendar</p>
             </div>
           </div>
         </div>
@@ -392,6 +470,76 @@ export function AccountsPage() {
             ) : (
               <div className="text-center py-8 text-gray-500 text-sm">
                 No Microsoft Todo accounts connected yet
+              </div>
+            )}
+          </div>
+
+          {/* Google Calendar Section */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center text-2xl">
+                  📅
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900">Google Calendar</h3>
+                  <p className="text-xs text-gray-500">
+                    {googleCalendarAccounts.length} account{googleCalendarAccounts.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleConnectGoogleCalendar}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition"
+              >
+                Add Google Calendar Account
+              </button>
+            </div>
+
+            {googleCalendarAccounts.length > 0 ? (
+              <div className="space-y-2">
+                {googleCalendarAccounts.map((account) => (
+                  <AccountCard key={account.id} account={account} onUpdate={loadAccounts} />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-gray-500 text-sm">
+                No Google Calendar accounts connected yet
+              </div>
+            )}
+          </div>
+
+          {/* Outlook Calendar Section */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-sky-100 rounded-lg flex items-center justify-center text-2xl">
+                  🗓️
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900">Outlook Calendar</h3>
+                  <p className="text-xs text-gray-500">
+                    {outlookCalendarAccounts.length} account{outlookCalendarAccounts.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleConnectOutlookCalendar}
+                className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-sm font-medium rounded-lg transition"
+              >
+                Add Outlook Calendar Account
+              </button>
+            </div>
+
+            {outlookCalendarAccounts.length > 0 ? (
+              <div className="space-y-2">
+                {outlookCalendarAccounts.map((account) => (
+                  <AccountCard key={account.id} account={account} onUpdate={loadAccounts} />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-gray-500 text-sm">
+                No Outlook Calendar accounts connected yet
               </div>
             )}
           </div>
