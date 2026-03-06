@@ -39,6 +39,12 @@ import { UniversalEmailRouter } from './services/email/UniversalEmailRouter.js';
 import { emailService } from './services/email/EmailService.js';
 import { GmailProvider } from './services/email/providers/GmailProvider.js';
 import { OutlookProvider } from './services/email/providers/OutlookProvider.js';
+import { taskService } from './services/task/TaskService.js';
+import { TodoistProvider } from './services/task/providers/TodoistProvider.js';
+import { MicrosoftTodoProvider } from './services/task/providers/MicrosoftTodoProvider.js';
+import { UniversalTaskRouter } from './services/task/UniversalTaskRouter.js';
+import { todoistOAuthRoutes } from './routes/todoist-oauth.js';
+import { microsoftTodoOAuthRoutes } from './routes/microsoft-todo-oauth.js';
 import { SessionTaskManager } from './services/task-queue/index.js';
 import type { ToolExecutor, TaskExecutionContext } from './services/task-queue/types.js';
 import { taskRoutes } from './routes/tasks.js';
@@ -142,6 +148,16 @@ async function start() {
   await emailRouter.initialize();
   console.log('[CoreLink HTTP] UniversalEmailRouter initialized');
 
+  // Initialize TaskService with providers
+  console.log('[CoreLink HTTP] Registering task providers...');
+  taskService.registerProvider('com.corelink.todoist', new TodoistProvider());
+  taskService.registerProvider('com.corelink.microsoft-todo', new MicrosoftTodoProvider());
+  console.log('[CoreLink HTTP] Task providers registered');
+
+  // Initialize UniversalTaskRouter
+  const taskRouter = new UniversalTaskRouter(credentialManager);
+  console.log('[CoreLink HTTP] UniversalTaskRouter initialized');
+
   // Initialize plugin registry (still used for tool schema definitions)
   const pluginRegistry = new PluginRegistry(db);
   await pluginRegistry.loadPlugins();
@@ -164,6 +180,14 @@ async function start() {
           return (await emailRouter.sendEmail(args, { signal: context.signal })).data;
         case 'search_emails':
           return (await emailRouter.searchEmails(args, { signal: context.signal })).data;
+        case 'list_tasks':
+          return (await taskRouter.listTasks(args)).data;
+        case 'create_task':
+          return (await taskRouter.createTask(args)).data;
+        case 'update_task':
+          return (await taskRouter.updateTask(args)).data;
+        case 'complete_task':
+          return (await taskRouter.completeTask(args)).data;
         default:
           throw new Error(`Unknown tool: ${toolName}`);
       }
@@ -519,6 +543,69 @@ async function start() {
       }
     );
 
+    // Register universal task tools
+    server.registerTool(
+      'list_tasks',
+      {
+        description: 'List tasks from ALL configured task accounts (Todoist, Microsoft Todo, etc.). Aggregates results across providers.',
+        inputSchema: z.object({
+          project_id: z.string().optional(),
+          filter: z.string().optional(),
+          max_results: z.number().optional(),
+        }),
+      },
+      async (args: any): Promise<CallToolResult> => {
+        return executeThroughQueue('list_tasks', args);
+      }
+    );
+
+    server.registerTool(
+      'create_task',
+      {
+        description: 'Create a new task in the primary task account (Todoist or Microsoft Todo).',
+        inputSchema: z.object({
+          title: z.string(),
+          description: z.string().optional(),
+          due_date: z.string().optional(),
+          priority: z.number().optional(),
+          project_id: z.string().optional(),
+        }),
+      },
+      async (args: any): Promise<CallToolResult> => {
+        return executeThroughQueue('create_task', args);
+      }
+    );
+
+    server.registerTool(
+      'update_task',
+      {
+        description: 'Update an existing task in the primary task account.',
+        inputSchema: z.object({
+          task_id: z.string(),
+          title: z.string().optional(),
+          description: z.string().optional(),
+          due_date: z.string().optional(),
+          priority: z.number().optional(),
+        }),
+      },
+      async (args: any): Promise<CallToolResult> => {
+        return executeThroughQueue('update_task', args);
+      }
+    );
+
+    server.registerTool(
+      'complete_task',
+      {
+        description: 'Mark a task as completed in the primary task account.',
+        inputSchema: z.object({
+          task_id: z.string(),
+        }),
+      },
+      async (args: any): Promise<CallToolResult> => {
+        return executeThroughQueue('complete_task', args);
+      }
+    );
+
     return server;
   };
 
@@ -558,7 +645,7 @@ async function start() {
         enabled: true,
         sessions: mcpSessionManager.getSessionCount(),
         plugins: pluginRegistry.getPluginCount(),
-        tools: 4, // Universal email tools: list_emails, read_email, send_email, search_emails
+        tools: 8, // 4 email tools + 4 task tools
       },
     };
   });
@@ -567,6 +654,8 @@ async function start() {
   fastify.register(async (instance) => {
     await oauthRoutes(instance, credentialManager);
     await outlookOAuthRoutes(instance, credentialManager);
+    await todoistOAuthRoutes(instance, credentialManager);
+    await microsoftTodoOAuthRoutes(instance, credentialManager);
   });
 
   // Register account management routes
@@ -623,6 +712,7 @@ async function start() {
 ║   📊 Stats:                                        ║
 ║   - Plugins loaded: ${pluginRegistry.getPluginCount()}                           ║
 ║   - Universal email tools: 4                      ║
+║   - Universal task tools: 4                       ║
 ║                                                   ║
 ║   Next steps:                                     ║
 ║   1. Start web UI: npm run dev -w @corelink/web   ║

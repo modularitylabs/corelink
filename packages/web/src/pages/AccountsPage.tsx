@@ -5,8 +5,11 @@ import {
   getAccounts,
   startGmailOAuth,
   startOutlookOAuth,
+  connectTodoist,
+  startMicrosoftTodoOAuth,
   getGmailStatus,
   getOutlookStatus,
+  getMicrosoftTodoStatus,
 } from '../api/client';
 import { AccountCard } from '../components/AccountCard';
 import { LoadingSpinner } from '../components/LoadingSpinner';
@@ -15,6 +18,9 @@ export function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [groupBy, setGroupBy] = useState<'provider' | 'all'>('provider');
+  const [showTodoistForm, setShowTodoistForm] = useState(false);
+  const [todoistToken, setTodoistToken] = useState('');
+  const [todoistConnecting, setTodoistConnecting] = useState(false);
 
   useEffect(() => {
     loadAccounts();
@@ -80,6 +86,49 @@ export function AccountsPage() {
     }
   }
 
+  async function handleConnectTodoist() {
+    if (!todoistToken.trim()) {
+      toast.error('Please enter your Todoist API token');
+      return;
+    }
+    setTodoistConnecting(true);
+    try {
+      await connectTodoist(todoistToken.trim());
+      await loadAccounts();
+      setShowTodoistForm(false);
+      setTodoistToken('');
+      toast.success('Todoist account connected successfully');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to connect Todoist');
+    } finally {
+      setTodoistConnecting(false);
+    }
+  }
+
+  async function handleConnectMicrosoftTodo() {
+    try {
+      const data = await startMicrosoftTodoOAuth();
+      if (data.authUrl) {
+        window.open(data.authUrl, '_blank', 'width=600,height=700');
+
+        const initialCount = accounts.filter((a) => a.pluginId === 'com.corelink.microsoft-todo').length;
+        const interval = setInterval(async () => {
+          const statusData = await getMicrosoftTodoStatus();
+          if (statusData.accounts && statusData.accounts.length > initialCount) {
+            await loadAccounts();
+            clearInterval(interval);
+            toast.success('Microsoft Todo account connected successfully');
+          }
+        }, 2000);
+
+        setTimeout(() => clearInterval(interval), 120000);
+      }
+    } catch (error) {
+      toast.error('Failed to connect Microsoft Todo');
+      console.error(error);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -90,6 +139,8 @@ export function AccountsPage() {
 
   const gmailAccounts = accounts.filter((a) => a.pluginId === 'com.corelink.gmail');
   const outlookAccounts = accounts.filter((a) => a.pluginId === 'com.corelink.outlook');
+  const todoistAccounts = accounts.filter((a) => a.pluginId === 'com.corelink.todoist');
+  const msTodoAccounts = accounts.filter((a) => a.pluginId === 'com.corelink.microsoft-todo');
 
   return (
     <div className="space-y-6">
@@ -114,7 +165,7 @@ export function AccountsPage() {
       </div>
 
       {/* Stats Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center text-xl">
@@ -122,7 +173,7 @@ export function AccountsPage() {
             </div>
             <div>
               <p className="text-2xl font-bold text-gray-900">{gmailAccounts.length}</p>
-              <p className="text-sm text-gray-600">Gmail Accounts</p>
+              <p className="text-sm text-gray-600">Gmail</p>
             </div>
           </div>
         </div>
@@ -134,19 +185,31 @@ export function AccountsPage() {
             </div>
             <div>
               <p className="text-2xl font-bold text-gray-900">{outlookAccounts.length}</p>
-              <p className="text-sm text-gray-600">Outlook Accounts</p>
+              <p className="text-sm text-gray-600">Outlook</p>
             </div>
           </div>
         </div>
 
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center text-xl">
+            <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center text-xl">
               ✓
             </div>
             <div>
-              <p className="text-2xl font-bold text-gray-900">{accounts.length}</p>
-              <p className="text-sm text-gray-600">Total Accounts</p>
+              <p className="text-2xl font-bold text-gray-900">{todoistAccounts.length}</p>
+              <p className="text-sm text-gray-600">Todoist</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl">
+              📋
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-900">{msTodoAccounts.length}</p>
+              <p className="text-sm text-gray-600">MS Todo</p>
             </div>
           </div>
         </div>
@@ -220,6 +283,115 @@ export function AccountsPage() {
             ) : (
               <div className="text-center py-8 text-gray-500 text-sm">
                 No Outlook accounts connected yet
+              </div>
+            )}
+          </div>
+
+          {/* Todoist Section */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center text-2xl">
+                  ✓
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900">Todoist</h3>
+                  <p className="text-xs text-gray-500">
+                    {todoistAccounts.length} account{todoistAccounts.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowTodoistForm(v => !v)}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition"
+              >
+                Add Todoist Account
+              </button>
+            </div>
+
+            {showTodoistForm && (
+              <div className="border border-gray-200 rounded-lg p-4 space-y-3 bg-gray-50 mb-4">
+                <p className="text-sm text-gray-600">
+                  Get your API token from{' '}
+                  <a
+                    href="https://app.todoist.com/app/settings/integrations/developer"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-red-600 hover:underline"
+                  >
+                    Todoist Settings → Integrations → Developer
+                  </a>
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={todoistToken}
+                    onChange={e => setTodoistToken(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleConnectTodoist()}
+                    placeholder="Paste your API token..."
+                    className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                  <button
+                    onClick={handleConnectTodoist}
+                    disabled={todoistConnecting}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition"
+                  >
+                    {todoistConnecting ? 'Connecting...' : 'Connect'}
+                  </button>
+                  <button
+                    onClick={() => { setShowTodoistForm(false); setTodoistToken(''); }}
+                    className="px-3 py-2 text-gray-500 hover:text-gray-700 text-sm rounded-lg transition"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {todoistAccounts.length > 0 ? (
+              <div className="space-y-2">
+                {todoistAccounts.map((account) => (
+                  <AccountCard key={account.id} account={account} onUpdate={loadAccounts} />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-gray-500 text-sm">
+                No Todoist accounts connected yet
+              </div>
+            )}
+          </div>
+
+          {/* Microsoft Todo Section */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-2xl">
+                  📋
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900">Microsoft Todo</h3>
+                  <p className="text-xs text-gray-500">
+                    {msTodoAccounts.length} account{msTodoAccounts.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleConnectMicrosoftTodo}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition"
+              >
+                Add Microsoft Todo Account
+              </button>
+            </div>
+
+            {msTodoAccounts.length > 0 ? (
+              <div className="space-y-2">
+                {msTodoAccounts.map((account) => (
+                  <AccountCard key={account.id} account={account} onUpdate={loadAccounts} />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-gray-500 text-sm">
+                No Microsoft Todo accounts connected yet
               </div>
             )}
           </div>

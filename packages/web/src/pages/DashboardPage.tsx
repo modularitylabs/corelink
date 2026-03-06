@@ -4,15 +4,24 @@ import type { Account } from '../api/client';
 import {
   getGmailStatus,
   getOutlookStatus,
+  getTodoistStatus,
+  getMicrosoftTodoStatus,
   startGmailOAuth,
   startOutlookOAuth,
+  connectTodoist,
+  startMicrosoftTodoOAuth,
 } from '../api/client';
 import { AccountCard } from '../components/AccountCard';
 
 export function DashboardPage() {
   const [gmailAccounts, setGmailAccounts] = useState<Account[]>([]);
   const [outlookAccounts, setOutlookAccounts] = useState<Account[]>([]);
+  const [todoistAccounts, setTodoistAccounts] = useState<Account[]>([]);
+  const [msTodoAccounts, setMsTodoAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showTodoistForm, setShowTodoistForm] = useState(false);
+  const [todoistToken, setTodoistToken] = useState('');
+  const [todoistConnecting, setTodoistConnecting] = useState(false);
 
   useEffect(() => {
     checkStatus();
@@ -20,13 +29,17 @@ export function DashboardPage() {
 
   async function checkStatus() {
     try {
-      const [gmailData, outlookData] = await Promise.all([
+      const [gmailData, outlookData, todoistData, msTodoData] = await Promise.all([
         getGmailStatus(),
         getOutlookStatus(),
+        getTodoistStatus(),
+        getMicrosoftTodoStatus(),
       ]);
 
       setGmailAccounts(gmailData.accounts || []);
       setOutlookAccounts(outlookData.accounts || []);
+      setTodoistAccounts(todoistData.accounts || []);
+      setMsTodoAccounts(msTodoData.accounts || []);
     } catch (error) {
       toast.error('Failed to check connection status');
       console.error('Failed to check connection status:', error);
@@ -38,7 +51,6 @@ export function DashboardPage() {
   async function handleConnectGmail() {
     try {
       const data = await startGmailOAuth();
-
       if (data.authUrl) {
         window.open(data.authUrl, '_blank', 'width=600,height=700');
 
@@ -65,7 +77,6 @@ export function DashboardPage() {
   async function handleConnectOutlook() {
     try {
       const data = await startOutlookOAuth();
-
       if (data.authUrl) {
         window.open(data.authUrl, '_blank', 'width=600,height=700');
 
@@ -86,6 +97,52 @@ export function DashboardPage() {
     } catch (error) {
       toast.error('Failed to connect Outlook');
       console.error('Failed to start Outlook OAuth:', error);
+    }
+  }
+
+  async function handleConnectTodoist() {
+    if (!todoistToken.trim()) {
+      toast.error('Please enter your Todoist API token');
+      return;
+    }
+    setTodoistConnecting(true);
+    try {
+      await connectTodoist(todoistToken.trim());
+      const statusData = await getTodoistStatus();
+      setTodoistAccounts(statusData.accounts || []);
+      setShowTodoistForm(false);
+      setTodoistToken('');
+      toast.success('Todoist account connected successfully');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to connect Todoist');
+    } finally {
+      setTodoistConnecting(false);
+    }
+  }
+
+  async function handleConnectMicrosoftTodo() {
+    try {
+      const data = await startMicrosoftTodoOAuth();
+      if (data.authUrl) {
+        window.open(data.authUrl, '_blank', 'width=600,height=700');
+
+        const initialCount = msTodoAccounts.length;
+        const interval = setInterval(async () => {
+          const statusData = await getMicrosoftTodoStatus();
+          if (statusData.accounts && statusData.accounts.length > initialCount) {
+            setMsTodoAccounts(statusData.accounts);
+            clearInterval(interval);
+            toast.success('Microsoft Todo account connected successfully');
+          }
+        }, 2000);
+
+        setTimeout(() => clearInterval(interval), 120000);
+      } else {
+        toast.error('Failed to get authorization URL');
+      }
+    } catch (error) {
+      toast.error('Failed to connect Microsoft Todo');
+      console.error('Failed to start Microsoft Todo OAuth:', error);
     }
   }
 
@@ -173,25 +230,109 @@ export function DashboardPage() {
           )}
         </div>
 
-        {/* Todoist Card (Coming Soon) */}
-        <div className="bg-white border border-gray-200 rounded-lg p-6 opacity-50">
+        {/* Todoist Section */}
+        <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center text-2xl">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center text-2xl">
                 ✓
               </div>
               <div>
                 <h3 className="font-semibold text-gray-900">Todoist</h3>
-                <p className="text-sm text-gray-500">Coming soon</p>
+                <p className="text-xs text-gray-500">
+                  {todoistAccounts.length > 0
+                    ? `${todoistAccounts.length} account${todoistAccounts.length > 1 ? 's' : ''} connected`
+                    : 'Not connected'}
+                </p>
               </div>
             </div>
             <button
-              disabled
-              className="px-6 py-2 bg-gray-300 text-gray-500 font-medium rounded-lg cursor-not-allowed"
+              onClick={() => setShowTodoistForm(v => !v)}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition shadow-sm"
             >
-              Coming Soon
+              {todoistAccounts.length > 0 ? 'Add Another Account' : 'Connect Todoist'}
             </button>
           </div>
+
+          {showTodoistForm && (
+            <div className="border border-gray-200 rounded-lg p-4 space-y-3 bg-gray-50">
+              <p className="text-sm text-gray-600">
+                Get your API token from{' '}
+                <a
+                  href="https://app.todoist.com/app/settings/integrations/developer"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-red-600 hover:underline"
+                >
+                  Todoist Settings → Integrations → Developer
+                </a>
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={todoistToken}
+                  onChange={e => setTodoistToken(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleConnectTodoist()}
+                  placeholder="Paste your API token..."
+                  className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500"
+                />
+                <button
+                  onClick={handleConnectTodoist}
+                  disabled={todoistConnecting}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition"
+                >
+                  {todoistConnecting ? 'Connecting...' : 'Connect'}
+                </button>
+                <button
+                  onClick={() => { setShowTodoistForm(false); setTodoistToken(''); }}
+                  className="px-3 py-2 text-gray-500 hover:text-gray-700 text-sm rounded-lg transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {todoistAccounts.length > 0 && (
+            <div className="space-y-2">
+              {todoistAccounts.map((account) => (
+                <AccountCard key={account.id} account={account} onUpdate={checkStatus} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Microsoft Todo Section */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-2xl">
+                📋
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900">Microsoft Todo</h3>
+                <p className="text-xs text-gray-500">
+                  {msTodoAccounts.length > 0
+                    ? `${msTodoAccounts.length} account${msTodoAccounts.length > 1 ? 's' : ''} connected`
+                    : 'Not connected'}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleConnectMicrosoftTodo}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition shadow-sm"
+            >
+              {msTodoAccounts.length > 0 ? 'Add Another Account' : 'Connect Microsoft Todo'}
+            </button>
+          </div>
+
+          {msTodoAccounts.length > 0 && (
+            <div className="space-y-2">
+              {msTodoAccounts.map((account) => (
+                <AccountCard key={account.id} account={account} onUpdate={checkStatus} />
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -200,15 +341,15 @@ export function DashboardPage() {
         <h3 className="font-semibold text-purple-900 mb-2">Getting Started</h3>
         <ol className="text-sm space-y-2 text-purple-800">
           <li>1. Connect your Gmail or Outlook account above</li>
-          <li>2. Configure access policies in the Policies tab</li>
-          <li>3. Connect your AI agent via MCP protocol</li>
-          <li>4. Monitor all activity in the Audit Logs tab</li>
+          <li>2. Connect Todoist or Microsoft Todo for task management</li>
+          <li>3. Configure access policies in the Policies tab</li>
+          <li>4. Connect your AI agent via MCP protocol</li>
+          <li>5. Monitor all activity in the Audit Logs tab</li>
         </ol>
         <div className="mt-4 pt-4 border-t border-purple-200">
           <p className="text-sm text-purple-700">
-            <strong>Multi-Account Support:</strong> You can connect multiple Gmail or Outlook
-            accounts (e.g., work@gmail.com + personal@gmail.com). AI agents can access all
-            connected accounts based on your policies!
+            <strong>Multi-Account Support:</strong> You can connect multiple accounts per provider.
+            AI agents can access all connected accounts based on your policies!
           </p>
         </div>
       </div>

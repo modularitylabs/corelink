@@ -382,3 +382,44 @@ export async function disconnectOutlook(): Promise<void> {
   const response = await fetch(`${API_URL}/oauth/outlook`, { method: 'DELETE' });
   if (!response.ok) throw new Error('Failed to disconnect Outlook');
 }
+
+export async function getTodoistStatus(): Promise<{ accounts: Account[] }> {
+  const response = await fetch(`${API_URL}/oauth/todoist/status`);
+  if (!response.ok) throw new Error('Failed to fetch Todoist status');
+  return response.json();
+}
+
+export async function getMicrosoftTodoStatus(): Promise<{ accounts: Account[] }> {
+  const response = await fetch(`${API_URL}/oauth/microsoft-todo/status`);
+  if (!response.ok) throw new Error('Failed to fetch Microsoft Todo status');
+  return response.json();
+}
+
+export async function connectTodoist(apiToken: string): Promise<{ success: boolean; email: string; displayName?: string }> {
+  const response = await fetch(`${API_URL}/oauth/todoist/connect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiToken }),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to connect Todoist');
+  }
+  return response.json();
+}
+
+export async function startMicrosoftTodoOAuth(): Promise<{ authUrl: string }> {
+  const response = await fetch(`${API_URL}/oauth/microsoft-todo/start`);
+  if (!response.ok) throw new Error('Failed to start Microsoft Todo OAuth');
+  return response.json();
+}
+
+export async function disconnectTodoist(): Promise<void> {
+  const response = await fetch(`${API_URL}/oauth/todoist`, { method: 'DELETE' });
+  if (!response.ok) throw new Error('Failed to disconnect Todoist');
+}
+
+export async function disconnectMicrosoftTodo(): Promise<void> {
+  const response = await fetch(`${API_URL}/oauth/microsoft-todo`, { method: 'DELETE' });
+  if (!response.ok) throw new Error('Failed to disconnect Microsoft Todo');
+}
