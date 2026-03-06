@@ -25,7 +25,7 @@ export async function microsoftTodoOAuthRoutes(
     const MICROSOFT_CLIENT_ID =
       process.env.MICROSOFT_CLIENT_ID || '00000000-0000-0000-0000-000000000000';
 
-    const redirectUri = 'http://127.0.0.1:3000/oauth/callback/microsoft-todo';
+    const redirectUri = 'http://127.0.0.1:3747/oauth/callback/microsoft-todo';
 
     fastify.log.info(`[MS Todo] Using Microsoft Client ID: ${MICROSOFT_CLIENT_ID}`);
 
@@ -89,7 +89,7 @@ export async function microsoftTodoOAuthRoutes(
         return reply.code(400).send({ error: 'Invalid or expired state parameter' });
       }
 
-      const redirectUri = 'http://127.0.0.1:3000/oauth/callback/microsoft-todo';
+      const redirectUri = 'http://127.0.0.1:3747/oauth/callback/microsoft-todo';
 
       const tokenParams = new URLSearchParams({
         client_id: MICROSOFT_CLIENT_ID,

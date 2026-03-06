@@ -44,7 +44,7 @@ export class GmailPlugin implements ICoreLinkPlugin {
         label: 'Redirect URI',
         description: 'OAuth redirect URI (must match Google Console)',
         required: true,
-        default: 'http://localhost:3000/oauth/callback',
+        default: 'http://localhost:3747/oauth/callback',
       },
     };
   }

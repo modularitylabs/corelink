@@ -25,7 +25,7 @@ export async function oauthRoutes(
       process.env.GOOGLE_CLIENT_ID || '1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com';
 
     // Use 127.0.0.1 (loopback IP) as required by Google for Desktop apps
-    const redirectUri = 'http://127.0.0.1:3000/oauth/callback';
+    const redirectUri = 'http://127.0.0.1:3747/oauth/callback';
 
     // Debug: Log the Client ID being used
     fastify.log.info(`Using Google Client ID: ${GOOGLE_CLIENT_ID}`);
@@ -96,7 +96,7 @@ export async function oauthRoutes(
       }
 
       // Use 127.0.0.1 (loopback IP) as required by Google for Desktop apps
-      const redirectUri = 'http://127.0.0.1:3000/oauth/callback';
+      const redirectUri = 'http://127.0.0.1:3747/oauth/callback';
       const oauth2Client = new google.auth.OAuth2(GOOGLE_CLIENT_ID, undefined, redirectUri);
 
       // Exchange code + verifier for tokens (PKCE!)

@@ -2,7 +2,7 @@
  * API Client for CoreLink Gateway
  */
 
-const API_URL = 'http://localhost:3000';
+const API_URL = 'http://localhost:3747';
 
 // ===== Types =====
 

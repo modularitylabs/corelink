@@ -48,6 +48,10 @@ export class UniversalTaskRouter {
       project_id: args.project_id as string | undefined,
       filter: args.filter as string | undefined,
       max_results: (args.max_results as number) || 20,
+      priority: args.priority as number | undefined,
+      overdue: args.overdue as boolean | undefined,
+      due_before: args.due_before as string | undefined,
+      due_after: args.due_after as string | undefined,
     };
 
     const tasks = await taskService.listTasks(accounts, listArgs);

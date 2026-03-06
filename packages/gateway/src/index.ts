@@ -43,7 +43,7 @@ import { taskService } from './services/task/TaskService.js';
 import { TodoistProvider } from './services/task/providers/TodoistProvider.js';
 import { MicrosoftTodoProvider } from './services/task/providers/MicrosoftTodoProvider.js';
 import { UniversalTaskRouter } from './services/task/UniversalTaskRouter.js';
-import { todoistOAuthRoutes } from './routes/todoist-oauth.js';
+import { todoistOAuthRoutes } from './routes/todoist.js';
 import { microsoftTodoOAuthRoutes } from './routes/microsoft-todo-oauth.js';
 import { SessionTaskManager } from './services/task-queue/index.js';
 import type { ToolExecutor, TaskExecutionContext } from './services/task-queue/types.js';
@@ -552,6 +552,10 @@ async function start() {
           project_id: z.string().optional(),
           filter: z.string().optional(),
           max_results: z.number().optional(),
+          priority: z.number().min(1).max(4).optional(),
+          overdue: z.boolean().optional(),
+          due_before: z.string().optional(),
+          due_after: z.string().optional(),
         }),
       },
       async (args: any): Promise<CallToolResult> => {

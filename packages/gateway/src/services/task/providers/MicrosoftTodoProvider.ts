@@ -63,12 +63,15 @@ export class MicrosoftTodoProvider implements ITaskProvider {
     const client = this.getGraphClient(account);
     const maxResults = args.max_results || 20;
 
+    // Build OData filter
+    const odataFilter = this.buildODataFilter(args);
+
     // If a specific list is requested, query just that one
     if (args.project_id) {
       const response = await client
         .api(`/me/todo/lists/${args.project_id}/tasks`)
         .top(maxResults)
-        .filter("status ne 'completed'")
+        .filter(odataFilter)
         .get();
       const tasks: TodoTask[] = response.value || [];
       return tasks.map(task => this.normalizeTask(task, account, args.project_id!));
@@ -86,7 +89,7 @@ export class MicrosoftTodoProvider implements ITaskProvider {
           const response = await client
             .api(`/me/todo/lists/${list.id}/tasks`)
             .top(perList)
-            .filter("status ne 'completed'")
+            .filter(odataFilter)
             .get();
           const tasks: TodoTask[] = response.value || [];
           return tasks.map(task => this.normalizeTask(task, account, list.id!, list.displayName));
@@ -180,6 +183,32 @@ export class MicrosoftTodoProvider implements ITaskProvider {
         error: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  /**
+   * Build OData filter string from structured ListTasksArgs
+   */
+  private buildODataFilter(args: ListTasksArgs): string {
+    const parts: string[] = ["status ne 'completed'"];
+
+    if (args.priority !== undefined) {
+      const importance = priorityToImportance(args.priority);
+      parts.push(`importance eq '${importance}'`);
+    }
+
+    const today = new Date().toISOString();
+
+    if (args.overdue) {
+      parts.push(`dueDateTime/dateTime lt '${today}'`);
+    }
+    if (args.due_before) {
+      parts.push(`dueDateTime/dateTime lt '${new Date(args.due_before).toISOString()}'`);
+    }
+    if (args.due_after) {
+      parts.push(`dueDateTime/dateTime gt '${new Date(args.due_after).toISOString()}'`);
+    }
+
+    return parts.join(' and ');
   }
 
   /**

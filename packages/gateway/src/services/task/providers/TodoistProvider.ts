@@ -8,14 +8,22 @@
 import type { ITaskProvider } from '../ITaskProvider.js';
 import type { Account, Task, TaskResult, ListTasksArgs, CreateTaskArgs, UpdateTaskArgs } from '../types.js';
 
-const TODOIST_API = 'https://api.todoist.com/rest/v2';
+const TODOIST_API = 'https://api.todoist.com/api/v1';
 
 export class TodoistProvider implements ITaskProvider {
   async listTasks(account: Account, args: ListTasksArgs): Promise<Task[]> {
     const token = this.getToken(account);
     const params = new URLSearchParams();
     if (args.project_id) params.set('project_id', args.project_id);
-    if (args.filter) params.set('filter', args.filter);
+
+    // Build filter string from structured args + any native filter
+    const filterParts: string[] = [];
+    if (args.filter) filterParts.push(args.filter);
+    if (args.overdue) filterParts.push('overdue');
+    if (args.priority) filterParts.push(`p${args.priority}`);
+    if (args.due_before) filterParts.push(`due before: ${args.due_before}`);
+    if (args.due_after) filterParts.push(`due after: ${args.due_after}`);
+    if (filterParts.length > 0) params.set('filter', filterParts.join(' & '));
 
     const url = `${TODOIST_API}/tasks${params.size > 0 ? '?' + params.toString() : ''}`;
     const response = await fetch(url, { headers: this.headers(token) });

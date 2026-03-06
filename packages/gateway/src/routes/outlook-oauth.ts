@@ -27,7 +27,7 @@ export async function outlookOAuthRoutes(
       process.env.MICROSOFT_CLIENT_ID || '00000000-0000-0000-0000-000000000000';
 
     // Use 127.0.0.1 (loopback IP) as required for native/desktop apps
-    const redirectUri = 'http://127.0.0.1:3000/oauth/callback/outlook';
+    const redirectUri = 'http://127.0.0.1:3747/oauth/callback/outlook';
 
     // Debug: Log the Client ID being used
     fastify.log.info(`Using Microsoft Client ID: ${MICROSOFT_CLIENT_ID}`);
@@ -102,7 +102,7 @@ export async function outlookOAuthRoutes(
         });
       }
 
-      const redirectUri = 'http://127.0.0.1:3000/oauth/callback/outlook';
+      const redirectUri = 'http://127.0.0.1:3747/oauth/callback/outlook';
 
       // Exchange code + verifier for tokens (PKCE!)
       const tokenParams = new URLSearchParams({

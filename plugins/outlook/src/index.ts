@@ -38,7 +38,7 @@ export class OutlookPlugin implements ICoreLinkPlugin {
         label: 'Redirect URI',
         description: 'OAuth redirect URI (must match Azure Portal)',
         required: true,
-        default: 'http://127.0.0.1:3000/oauth/callback/outlook',
+        default: 'http://127.0.0.1:3747/oauth/callback/outlook',
       },
     };
   }

@@ -35,8 +35,12 @@ export interface Task {
  */
 export interface ListTasksArgs {
   project_id?: string;
-  filter?: string;
+  filter?: string;       // Provider-native filter string (advanced use)
   max_results?: number;
+  priority?: number;     // 1 (low) – 4 (urgent)
+  overdue?: boolean;     // Only tasks past their due date
+  due_before?: string;   // ISO8601 date — tasks due before this date
+  due_after?: string;    // ISO8601 date — tasks due after this date
 }
 
 /**
