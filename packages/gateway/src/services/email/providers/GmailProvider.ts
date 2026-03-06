@@ -6,7 +6,7 @@
 
 import { google } from 'googleapis';
 import type { gmail_v1 } from 'googleapis';
-import type { IEmailProvider } from '../IEmailProvider.js';
+import type { IEmailProvider, ProviderExecutionOptions } from '../IEmailProvider.js';
 import type {
   Account,
   Email,
@@ -22,22 +22,27 @@ export class GmailProvider implements IEmailProvider {
    * List emails from a Gmail account
    * OPTIMIZED: Uses 'metadata' format for fast listing (no body content)
    */
-  async listEmails(account: Account, args: ListEmailsArgs): Promise<Email[]> {
+  async listEmails(account: Account, args: ListEmailsArgs, options?: ProviderExecutionOptions): Promise<Email[]> {
     const gmail = this.getGmailClient(account);
     const maxResults = Math.min(args.max_results || 10, 500);
 
-    const response = await gmail.users.messages.list({
-      userId: 'me',
-      maxResults,
-      q: args.query,
-      includeSpamTrash: args.includeSpam || args.includeTrash,
-    });
+    const response = await gmail.users.messages.list(
+      {
+        userId: 'me',
+        maxResults,
+        q: args.query,
+        includeSpamTrash: args.includeSpam || args.includeTrash,
+      },
+      {
+        signal: options?.signal as any, // googleapis supports AbortSignal
+      }
+    );
 
     const messages = response.data.messages || [];
 
     // Fetch metadata only (headers + snippet, NO body) - much faster!
     const emailPromises = messages.map(msg =>
-      this.fetchEmailMetadata(gmail, account, msg.id!)
+      this.fetchEmailMetadata(gmail, account, msg.id!, options?.signal)
     );
 
     const emails = await Promise.all(emailPromises);
@@ -47,15 +52,15 @@ export class GmailProvider implements IEmailProvider {
   /**
    * Read a single email by ID
    */
-  async readEmail(account: Account, emailId: string): Promise<Email> {
+  async readEmail(account: Account, emailId: string, options?: ProviderExecutionOptions): Promise<Email> {
     const gmail = this.getGmailClient(account);
-    return this.fetchEmailDetails(gmail, account, emailId);
+    return this.fetchEmailDetails(gmail, account, emailId, options?.signal);
   }
 
   /**
    * Send an email from Gmail account
    */
-  async sendEmail(account: Account, args: SendEmailArgs): Promise<EmailResult> {
+  async sendEmail(account: Account, args: SendEmailArgs, options?: ProviderExecutionOptions): Promise<EmailResult> {
     const gmail = this.getGmailClient(account);
 
     try {
@@ -83,12 +88,17 @@ export class GmailProvider implements IEmailProvider {
         .replace(/\//g, '_')
         .replace(/=+$/, '');
 
-      const response = await gmail.users.messages.send({
-        userId: 'me',
-        requestBody: {
-          raw: encodedMessage,
+      const response = await gmail.users.messages.send(
+        {
+          userId: 'me',
+          requestBody: {
+            raw: encodedMessage,
+          },
         },
-      });
+        {
+          signal: options?.signal as any, // googleapis supports AbortSignal
+        }
+      );
 
       return {
         success: true,
@@ -107,7 +117,7 @@ export class GmailProvider implements IEmailProvider {
    * Search emails in Gmail account
    * OPTIMIZED: Uses 'metadata' format for fast searching (no body content)
    */
-  async searchEmails(account: Account, args: SearchEmailsArgs): Promise<Email[]> {
+  async searchEmails(account: Account, args: SearchEmailsArgs, options?: ProviderExecutionOptions): Promise<Email[]> {
     const gmail = this.getGmailClient(account);
     const maxResults = Math.min(args.max_results || 20, 500);
 
@@ -135,17 +145,22 @@ export class GmailProvider implements IEmailProvider {
       query += ` before:${date}`;
     }
 
-    const response = await gmail.users.messages.list({
-      userId: 'me',
-      maxResults,
-      q: query.trim(),
-    });
+    const response = await gmail.users.messages.list(
+      {
+        userId: 'me',
+        maxResults,
+        q: query.trim(),
+      },
+      {
+        signal: options?.signal as any, // googleapis supports AbortSignal
+      }
+    );
 
     const messages = response.data.messages || [];
 
     // Fetch metadata only (headers + snippet, NO body) - much faster!
     const emailPromises = messages.map(msg =>
-      this.fetchEmailMetadata(gmail, account, msg.id!)
+      this.fetchEmailMetadata(gmail, account, msg.id!, options?.signal)
     );
 
     const emails = await Promise.all(emailPromises);
@@ -202,14 +217,20 @@ export class GmailProvider implements IEmailProvider {
   private async fetchEmailMetadata(
     gmail: gmail_v1.Gmail,
     account: Account,
-    emailId: string
+    emailId: string,
+    signal?: AbortSignal
   ): Promise<Email> {
-    const response = await gmail.users.messages.get({
-      userId: 'me',
-      id: emailId,
-      format: 'metadata',
-      metadataHeaders: ['From', 'To', 'Cc', 'Bcc', 'Subject', 'Date'],
-    });
+    const response = await gmail.users.messages.get(
+      {
+        userId: 'me',
+        id: emailId,
+        format: 'metadata',
+        metadataHeaders: ['From', 'To', 'Cc', 'Bcc', 'Subject', 'Date'],
+      },
+      {
+        signal: signal as any, // googleapis supports AbortSignal
+      }
+    );
 
     const message = response.data;
     const headers = message.payload?.headers || [];
@@ -274,13 +295,19 @@ export class GmailProvider implements IEmailProvider {
   private async fetchEmailDetails(
     gmail: gmail_v1.Gmail,
     account: Account,
-    emailId: string
+    emailId: string,
+    signal?: AbortSignal
   ): Promise<Email> {
-    const response = await gmail.users.messages.get({
-      userId: 'me',
-      id: emailId,
-      format: 'full',
-    });
+    const response = await gmail.users.messages.get(
+      {
+        userId: 'me',
+        id: emailId,
+        format: 'full',
+      },
+      {
+        signal: signal as any, // googleapis supports AbortSignal
+      }
+    );
 
     const message = response.data;
     const headers = message.payload?.headers || [];

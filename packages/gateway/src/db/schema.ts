@@ -193,3 +193,77 @@ export const virtualIdMappings = sqliteTable('virtual_id_mappings', {
   virtualTypeIdx: index('idx_virtual_type')
     .on(table.virtualId, table.type),
 }));
+
+/**
+ * Task queue (for async MCP tool execution)
+ *
+ * Purpose: Persistent task queue with session-based worker pools
+ * - REQUIRE_APPROVAL policy support (tasks wait for user approval)
+ * - User cancellation (stop runaway AI agents from UI)
+ * - Resource fairness (prevent one agent from starving others)
+ * - Complete audit trail (all task executions logged)
+ *
+ * Lifecycle:
+ * 1. Task created with status='queued' (or 'pending_approval' if REQUIRE_APPROVAL policy)
+ * 2. Worker claims task (atomic transaction, status='running')
+ * 3. Worker executes task
+ * 4. Worker marks as 'completed' or 'failed'
+ * 5. Auto-cleanup after 30 days (completed_at IS NOT NULL)
+ *
+ * Indices:
+ * - idx_session_status: Fast session-specific queries
+ * - idx_status_priority: Fast worker claiming (sorted by priority + age)
+ * - idx_worker: Fast worker lookup (for cancellation)
+ * - idx_cleanup: Fast cleanup job (30-day retention)
+ */
+export const taskQueue = sqliteTable('task_queue', {
+  // Identity
+  id: text('id').primaryKey(), // task_<nanoid>
+  sessionId: text('session_id').notNull(), // MCP session identifier
+
+  // Task definition
+  toolName: text('tool_name').notNull(), // 'read_email', 'list_emails', etc.
+  args: text('args').notNull(), // JSON serialized arguments
+
+  // Execution state
+  status: text('status').notNull(), // 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'pending_approval'
+  priority: integer('priority').notNull().default(0), // Higher = more urgent (RESERVED FOR FUTURE)
+
+  // Worker tracking
+  workerId: text('worker_id'), // Which worker claimed this (e.g., 'session1-worker-2')
+  attempts: integer('attempts').notNull().default(0), // Retry count
+  maxAttempts: integer('max_attempts').notNull().default(3), // Max retries before marking failed
+
+  // Timing
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+  startedAt: text('started_at'), // When worker claimed it
+  completedAt: text('completed_at'), // When finished (success or failure)
+  timeoutAt: text('timeout_at'), // Auto-fail if not completed by this time
+
+  // Results
+  result: text('result'), // JSON serialized result (on success)
+  error: text('error'), // Error message (on failure)
+
+  // Policy integration
+  policyDecision: text('policy_decision'), // 'ALLOW' | 'BLOCK' | 'REDACT' | 'REQUIRE_APPROVAL'
+  approvalRequestId: text('approval_request_id'), // Foreign key to approval_requests table
+  redactedFields: text('redacted_fields'), // JSON array of redacted field paths
+}, (table) => ({
+  // Fast session-specific queries (e.g., "show all queued tasks for session X")
+  sessionStatusIdx: index('idx_session_status')
+    .on(table.sessionId, table.status),
+
+  // Fast worker claiming (sorted by priority DESC, created_at ASC)
+  statusPriorityIdx: index('idx_status_priority')
+    .on(table.status, table.priority, table.createdAt),
+
+  // Fast worker lookup (for cancellation)
+  workerIdx: index('idx_worker')
+    .on(table.workerId),
+
+  // Fast cleanup job (delete completed tasks older than 30 days)
+  cleanupIdx: index('idx_cleanup')
+    .on(table.completedAt, table.status),
+}));

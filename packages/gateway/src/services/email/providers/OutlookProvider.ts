@@ -5,7 +5,7 @@
  */
 
 import { Client } from '@microsoft/microsoft-graph-client';
-import type { IEmailProvider } from '../IEmailProvider.js';
+import type { IEmailProvider, ProviderExecutionOptions } from '../IEmailProvider.js';
 import type {
   Account,
   Email,
@@ -67,9 +67,12 @@ export class OutlookProvider implements IEmailProvider {
    * List emails from an Outlook account
    * OPTIMIZED: Uses $select to exclude body content (only bodyPreview/snippet)
    */
-  async listEmails(account: Account, args: ListEmailsArgs): Promise<Email[]> {
+  async listEmails(account: Account, args: ListEmailsArgs, _options?: ProviderExecutionOptions): Promise<Email[]> {
     const client = this.getGraphClient(account);
     const maxResults = Math.min(args.max_results || 10, 1000);
+
+    // Note: Microsoft Graph Client may not fully support AbortSignal in all methods
+    // TODO: Implement proper abort handling when Graph Client adds support
 
     // Build query parameters with $select to exclude body.content
     const selectFields = [
@@ -110,7 +113,7 @@ export class OutlookProvider implements IEmailProvider {
   /**
    * Read a single email by ID
    */
-  async readEmail(account: Account, emailId: string): Promise<Email> {
+  async readEmail(account: Account, emailId: string, _options?: ProviderExecutionOptions): Promise<Email> {
     const client = this.getGraphClient(account);
 
     const message: Message = await client.api(`/me/messages/${emailId}`).get();
@@ -121,7 +124,7 @@ export class OutlookProvider implements IEmailProvider {
   /**
    * Send an email from Outlook account
    */
-  async sendEmail(account: Account, args: SendEmailArgs): Promise<EmailResult> {
+  async sendEmail(account: Account, args: SendEmailArgs, _options?: ProviderExecutionOptions): Promise<EmailResult> {
     const client = this.getGraphClient(account);
 
     try {
@@ -176,7 +179,7 @@ export class OutlookProvider implements IEmailProvider {
    * Search emails in Outlook account
    * OPTIMIZED: Uses $select to exclude body content (only bodyPreview/snippet)
    */
-  async searchEmails(account: Account, args: SearchEmailsArgs): Promise<Email[]> {
+  async searchEmails(account: Account, args: SearchEmailsArgs, _options?: ProviderExecutionOptions): Promise<Email[]> {
     const client = this.getGraphClient(account);
     const maxResults = Math.min(args.max_results || 20, 1000);
 

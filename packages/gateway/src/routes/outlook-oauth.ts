@@ -48,7 +48,9 @@ export async function outlookOAuthRoutes(
       scope: [
         'openid',
         'profile',
+        'email',
         'offline_access',
+        'User.Read',
         'Mail.Read',
         'Mail.Send',
         'Mail.ReadWrite',
@@ -143,7 +145,8 @@ export async function outlookOAuthRoutes(
       });
 
       if (!graphResponse.ok) {
-        throw new Error('Failed to fetch user info from Microsoft Graph');
+        const graphError = await graphResponse.text();
+        throw new Error(`Failed to fetch user info from Microsoft Graph: ${graphResponse.status} ${graphError}`);
       }
 
       const userInfo = (await graphResponse.json()) as {
@@ -216,16 +219,6 @@ export async function outlookOAuthRoutes(
               color: #666;
               line-height: 1.6;
             }
-            .btn {
-              display: inline-block;
-              margin-top: 1.5rem;
-              padding: 0.75rem 2rem;
-              background: #0078d4;
-              color: white;
-              text-decoration: none;
-              border-radius: 0.5rem;
-              font-weight: 500;
-            }
           </style>
         </head>
         <body>
@@ -233,14 +226,10 @@ export async function outlookOAuthRoutes(
             <div class="success-icon">✓</div>
             <h1>Outlook Connected!</h1>
             <p>Your Outlook account has been successfully connected to CoreLink.</p>
-            <p>You can now close this window and return to the dashboard.</p>
-            <a href="http://localhost:5173" class="btn">Back to Dashboard</a>
+            <p>This window will close automatically...</p>
           </div>
           <script>
-            // Auto-close after 3 seconds
-            setTimeout(() => {
-              window.close();
-            }, 3000);
+            window.close();
           </script>
         </body>
         </html>

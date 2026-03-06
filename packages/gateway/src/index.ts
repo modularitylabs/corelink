@@ -39,6 +39,13 @@ import { UniversalEmailRouter } from './services/email/UniversalEmailRouter.js';
 import { emailService } from './services/email/EmailService.js';
 import { GmailProvider } from './services/email/providers/GmailProvider.js';
 import { OutlookProvider } from './services/email/providers/OutlookProvider.js';
+import { SessionTaskManager } from './services/task-queue/index.js';
+import type { ToolExecutor, TaskExecutionContext } from './services/task-queue/types.js';
+import { taskRoutes } from './routes/tasks.js';
+import { policyEngine } from './services/policy-engine.js';
+import { auditLogger } from './services/audit-logger.js';
+import { TaskCleanupService } from './services/task-cleanup.js';
+import { JobScheduler } from './jobs/scheduler.js';
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -102,62 +109,20 @@ See OUTLOOK_SETUP.md for instructions.
 }
 
 /**
- * Convert JSON Schema to Zod schema
- * This is a simple converter for the schemas we use in plugins
+ * Derive category from tool name
  */
-function jsonSchemaToZod(jsonSchema: Record<string, any>): z.ZodTypeAny {
-  if (jsonSchema.type !== 'object') {
-    return z.any();
-  }
-
-  const shape: Record<string, z.ZodTypeAny> = {};
-  const properties = jsonSchema.properties || {};
-  const required = jsonSchema.required || [];
-
-  for (const [key, prop] of Object.entries(properties) as [string, any][]) {
-    let zodType: z.ZodTypeAny;
-
-    switch (prop.type) {
-      case 'string':
-        zodType = z.string();
-        break;
-      case 'number':
-        zodType = z.number();
-        break;
-      case 'boolean':
-        zodType = z.boolean();
-        break;
-      case 'array':
-        zodType = z.array(z.any());
-        break;
-      case 'object':
-        zodType = z.object({});
-        break;
-      default:
-        zodType = z.any();
-    }
-
-    // Add description if present
-    if (prop.description) {
-      zodType = zodType.describe(prop.description);
-    }
-
-    // Make optional if not in required array
-    if (!required.includes(key)) {
-      zodType = zodType.optional();
-    }
-
-    shape[key] = zodType;
-  }
-
-  return z.object(shape);
+function deriveCategory(toolName: string): string {
+  if (toolName.includes('email')) return 'email';
+  if (toolName.includes('task')) return 'task';
+  if (toolName.includes('calendar')) return 'calendar';
+  return 'system';
 }
 
 async function start() {
   // Validate environment before starting
   validateEnvironment();
   // Initialize database
-  const { db } = initDatabase();
+  const { db, sqlite } = initDatabase();
   runMigrations(db);
 
   // Seed default policies and redaction patterns
@@ -181,8 +146,51 @@ async function start() {
   const pluginRegistry = new PluginRegistry(db);
   await pluginRegistry.loadPlugins();
 
+  // Create ToolExecutor function (wraps emailRouter calls for task queue)
+  const toolExecutor: ToolExecutor = async (
+    toolName: string,
+    args: Record<string, unknown>,
+    context: TaskExecutionContext
+  ): Promise<unknown> => {
+    console.log(`[ToolExecutor] Executing ${toolName} for task ${context.taskId}`);
+
+    try {
+      switch (toolName) {
+        case 'list_emails':
+          return (await emailRouter.listEmails(args, { signal: context.signal })).data;
+        case 'read_email':
+          return (await emailRouter.readEmail(args, { signal: context.signal })).data;
+        case 'send_email':
+          return (await emailRouter.sendEmail(args, { signal: context.signal })).data;
+        case 'search_emails':
+          return (await emailRouter.searchEmails(args, { signal: context.signal })).data;
+        default:
+          throw new Error(`Unknown tool: ${toolName}`);
+      }
+    } catch (error) {
+      console.error(`[ToolExecutor] Error executing ${toolName}:`, error);
+      throw error;
+    }
+  };
+
+  // Initialize SessionTaskManager
+  const taskManager = new SessionTaskManager(sqlite, toolExecutor);
+  console.log('[CoreLink] SessionTaskManager initialized');
+
+  // Initialize Task Cleanup Service
+  const cleanupService = new TaskCleanupService(db);
+  console.log('[CoreLink] TaskCleanupService initialized');
+
+  // Initialize Job Scheduler
+  const jobScheduler = new JobScheduler(cleanupService);
+  jobScheduler.start();
+  console.log('[CoreLink] JobScheduler started');
+
+  // Will be assigned after MCPSessionManager is created
+  let mcpSessionManager: MCPSessionManager;
+
   // Create MCP server factory - each session gets its own server instance
-  const createMcpServer = () => {
+  const createMcpServer = (sessionId: string) => {
     const server = new McpServer(
       {
         name: 'CoreLink Gateway',
@@ -195,7 +203,254 @@ async function start() {
       }
     );
 
-    // Register universal email tools (with virtual ID support)
+    // Note: The MCP SDK v1.26 handles initialization automatically
+    // We cannot intercept the initialize request to capture client metadata
+    // This is a limitation of the current SDK version
+    // TODO: Find alternative way to capture client capabilities or upgrade SDK
+
+    // Helper function to wrap tool execution through task queue
+    const executeThroughQueue = async (
+      toolName: string,
+      args: Record<string, unknown>
+    ): Promise<CallToolResult> => {
+      const startTime = Date.now();
+
+      // Get session metadata
+      const sessionMetadata = mcpSessionManager?.getSessionMetadata(sessionId);
+      const supportsAsyncTasks = !!sessionMetadata?.capabilities?.tasks;
+      const agentName = sessionMetadata?.clientInfo?.name || 'Unknown Client';
+      const agentVersion = sessionMetadata?.clientInfo?.version;
+      const category = deriveCategory(toolName);
+
+      console.log(`[MCP HTTP] ${toolName} called for session ${sessionId}`);
+      console.log(`[MCP HTTP] Agent: ${agentName} v${agentVersion || 'unknown'}`);
+      console.log(`[MCP HTTP] Execution mode: ${supportsAsyncTasks ? 'ASYNC (MCP Tasks)' : 'SYNC (enqueueAndWait)'}`);
+
+      try {
+        // ===== POLICY EVALUATION =====
+        const policyResult = await policyEngine.evaluate({
+          tool: toolName,
+          plugin: 'universal', // Universal email tools
+          agent: agentName,
+          agentVersion,
+          category,
+          args,
+        });
+
+        console.log(`[MCP HTTP] Policy decision: ${policyResult.action}`);
+
+        // Handle BLOCK action
+        if (policyResult.action === 'BLOCK') {
+          const executionTime = Date.now() - startTime;
+          await auditLogger.log({
+            agentName,
+            category,
+            pluginId: 'universal',
+            toolName,
+            inputArgs: args,
+            policyDecision: {
+              action: 'BLOCK',
+              ruleId: policyResult.matchedRuleId,
+              reason: policyResult.reason,
+            },
+            status: 'denied',
+            executionTimeMs: executionTime,
+            dataSummary: 'Request blocked by policy',
+          });
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Access Denied: ${policyResult.reason || 'Policy does not allow this operation'}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        // Handle REQUIRE_APPROVAL action
+        if (policyResult.action === 'REQUIRE_APPROVAL') {
+          console.log(`[MCP HTTP] Approval required for ${toolName} (request ID: ${policyResult.approvalRequestId})`);
+
+          // Enqueue task with pending_approval status
+          const task = await taskManager.enqueueTask({
+            sessionId,
+            toolName,
+            args: policyResult.modifiedArgs || args,
+            policyDecision: 'REQUIRE_APPROVAL',
+            approvalRequestId: policyResult.approvalRequestId,
+          });
+
+          const executionTime = Date.now() - startTime;
+          await auditLogger.log({
+            agentName,
+            category,
+            pluginId: 'universal',
+            toolName,
+            inputArgs: args,
+            policyDecision: {
+              action: 'REQUIRE_APPROVAL',
+              ruleId: policyResult.matchedRuleId,
+              reason: policyResult.reason,
+            },
+            status: 'denied', // Approval required = effectively denied until approved
+            executionTimeMs: executionTime,
+            dataSummary: 'Awaiting user approval',
+            metadata: {
+              approvalRequestId: policyResult.approvalRequestId,
+              taskId: task.id,
+            },
+          });
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Approval Required: ${policyResult.reason || 'This operation requires user approval'}\n\nApproval Request ID: ${policyResult.approvalRequestId}\nTask ID: ${task.id}\n\nPlease approve this request via the CoreLink web dashboard at /approvals.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        // Use modified args if REDACT action applied
+        const executionArgs = policyResult.modifiedArgs || args;
+
+        if (supportsAsyncTasks) {
+          // ===== ASYNC MODE: Client supports MCP Tasks =====
+          // Enqueue task and return task ID immediately
+          const task = await taskManager.enqueueTask({
+            sessionId,
+            toolName,
+            args: executionArgs,
+            policyDecision: policyResult.action,
+            redactedFields: policyResult.redactedFields,
+          });
+
+          console.log(`[MCP HTTP] Task enqueued (ASYNC): ${task.id}`);
+          console.log(`[MCP HTTP] Client can poll via GET /api/tasks/${task.id}`);
+
+          // Log task creation (not execution yet)
+          // Note: Audit log will show 'success' since task was successfully enqueued
+          // Actual execution will be logged separately by the worker
+          await auditLogger.log({
+            agentName,
+            category,
+            pluginId: 'universal',
+            toolName,
+            inputArgs: args,
+            policyDecision: {
+              action: policyResult.action,
+              ruleId: policyResult.matchedRuleId,
+              redactedFields: policyResult.redactedFields,
+              reason: policyResult.reason,
+            },
+            status: 'success',
+            executionTimeMs: Date.now() - startTime,
+            dataSummary: 'Task enqueued for async execution',
+            metadata: { taskId: task.id },
+          });
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  task: {
+                    id: task.id,
+                    status: task.status,
+                    message: 'Task enqueued. Poll /api/tasks/' + task.id + ' for results.',
+                    pollInterval: 1000, // Suggest 1 second polling
+                  },
+                }, null, 2),
+              },
+            ],
+          };
+        } else {
+          // ===== SYNC MODE: Client does NOT support MCP Tasks =====
+          // Enqueue and wait for completion (HTTP connection stays open)
+          console.log(`[MCP HTTP] Enqueueing task (SYNC mode - HTTP will wait for completion)`);
+
+          const result = await taskManager.enqueueAndWait({
+            sessionId,
+            toolName,
+            args: executionArgs,
+            policyDecision: policyResult.action,
+            redactedFields: policyResult.redactedFields,
+          });
+
+          console.log(`[MCP HTTP] ${toolName} completed (SYNC): ${JSON.stringify(result.result).substring(0, 200)}`);
+
+          // Log successful execution
+          await auditLogger.log({
+            agentName,
+            category,
+            pluginId: 'universal',
+            toolName,
+            inputArgs: args,
+            policyDecision: {
+              action: policyResult.action,
+              ruleId: policyResult.matchedRuleId,
+              redactedFields: policyResult.redactedFields,
+              reason: policyResult.reason,
+            },
+            status: 'success',
+            executionTimeMs: Date.now() - startTime,
+            dataSummary: 'Operation completed successfully (sync mode)',
+          });
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result.result, null, 2),
+              },
+            ],
+          };
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`[MCP HTTP] ${toolName} error:`, errorMessage);
+
+        // Log error
+        try {
+          const sessionMetadata = mcpSessionManager?.getSessionMetadata(sessionId);
+          const agentName = sessionMetadata?.clientInfo?.name || 'Unknown Client';
+          const category = deriveCategory(toolName);
+
+          await auditLogger.log({
+            agentName,
+            category,
+            pluginId: 'universal',
+            toolName,
+            inputArgs: args,
+            policyDecision: {
+              action: 'ALLOW',
+              reason: 'Error during execution',
+            },
+            status: 'error',
+            errorMessage,
+            executionTimeMs: Date.now() - startTime,
+            dataSummary: 'Error during execution',
+          });
+        } catch (logError) {
+          console.error('[MCP HTTP] Failed to log error:', logError);
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: ${errorMessage}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    };
+
+    // Register universal email tools (with task queue support)
     server.registerTool(
       'list_emails',
       {
@@ -208,31 +463,7 @@ async function start() {
         }),
       },
       async (args: any): Promise<CallToolResult> => {
-        console.error('[MCP HTTP] list_emails tool called with args:', JSON.stringify(args));
-        try {
-          const result = await emailRouter.listEmails(args);
-          console.error('[MCP HTTP] list_emails returned:', JSON.stringify(result.data).substring(0, 200));
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result.data, null, 2),
-              },
-            ],
-          };
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error('[MCP HTTP] list_emails error:', errorMessage);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Error: ${errorMessage}`,
-              },
-            ],
-            isError: true,
-          };
-        }
+        return executeThroughQueue('list_emails', args);
       }
     );
 
@@ -245,28 +476,7 @@ async function start() {
         }),
       },
       async (args: any): Promise<CallToolResult> => {
-        try {
-          const result = await emailRouter.readEmail(args);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result.data, null, 2),
-              },
-            ],
-          };
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Error: ${errorMessage}`,
-              },
-            ],
-            isError: true,
-          };
-        }
+        return executeThroughQueue('read_email', args);
       }
     );
 
@@ -285,28 +495,7 @@ async function start() {
         }),
       },
       async (args: any): Promise<CallToolResult> => {
-        try {
-          const result = await emailRouter.sendEmail(args);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result.data, null, 2),
-              },
-            ],
-          };
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Error: ${errorMessage}`,
-              },
-            ],
-            isError: true,
-          };
-        }
+        return executeThroughQueue('send_email', args);
       }
     );
 
@@ -326,28 +515,7 @@ async function start() {
         }),
       },
       async (args: any): Promise<CallToolResult> => {
-        try {
-          const result = await emailRouter.searchEmails(args);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result.data, null, 2),
-              },
-            ],
-          };
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Error: ${errorMessage}`,
-              },
-            ],
-            isError: true,
-          };
-        }
+        return executeThroughQueue('search_emails', args);
       }
     );
 
@@ -355,7 +523,17 @@ async function start() {
   };
 
   // Create MCP session manager with server factory
-  const mcpSessionManager = new MCPSessionManager(createMcpServer);
+  // Each MCP session will get its own task queue session created dynamically
+  mcpSessionManager = new MCPSessionManager((sessionId: string) => {
+    // Create task queue session for this MCP session
+    taskManager.createSession(sessionId).catch((error) => {
+      console.error(`[CoreLink] Failed to create task queue session ${sessionId}:`, error);
+    });
+    console.log(`[CoreLink] Created task queue session: ${sessionId}`);
+
+    // Return the MCP server instance
+    return createMcpServer(sessionId);
+  });
 
   // Create Fastify instance
   const fastify = Fastify({
@@ -399,6 +577,11 @@ async function start() {
   // Register policy management routes
   fastify.register(policyRoutes);
 
+  // Register task management routes
+  fastify.register(async (instance) => {
+    await taskRoutes(instance, taskManager, cleanupService);
+  });
+
   // Register MCP HTTP routes
   fastify.post('/mcp', async (request, reply) => {
     await mcpSessionManager.handleRequest(request, reply);
@@ -415,6 +598,8 @@ async function start() {
   // Graceful shutdown
   const shutdown = async () => {
     console.log('\n[CoreLink] Shutting down gracefully...');
+    jobScheduler.stop();
+    await taskManager.shutdownAll();
     await mcpSessionManager.cleanup();
     await fastify.close();
     process.exit(0);

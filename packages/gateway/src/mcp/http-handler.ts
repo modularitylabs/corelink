@@ -11,8 +11,23 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 /**
  * Factory function to create a new MCP server instance
+ * Receives the session ID as a parameter
  */
-type McpServerFactory = () => McpServer;
+type McpServerFactory = (sessionId: string) => McpServer;
+
+/**
+ * Session metadata captured from MCP initialize request
+ */
+export interface SessionMetadata {
+  clientInfo?: {
+    name: string;
+    version: string;
+  };
+  capabilities?: {
+    tasks?: boolean;
+    [key: string]: unknown;
+  };
+}
 
 /**
  * Session data including transport and server instance
@@ -20,6 +35,7 @@ type McpServerFactory = () => McpServer;
 interface SessionData {
   transport: StreamableHTTPServerTransport;
   server: McpServer;
+  metadata: SessionMetadata;
 }
 
 /**
@@ -96,15 +112,24 @@ export class MCPSessionManager {
    * Create a new session with its own MCP server and transport
    */
   private async createSession(): Promise<SessionData> {
-    // Create a new MCP server instance for this session
-    const server = this.serverFactory();
+    let sessionId: string | null = null;
+    let server: McpServer | null = null;
 
-    // Create transport
+    // Create transport first to get session ID
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
-      onsessioninitialized: (sessionId) => {
+      onsessioninitialized: (sid) => {
+        sessionId = sid;
         console.log(`[MCP HTTP] Session initialized: ${sessionId}`);
-        const sessionData: SessionData = { transport, server };
+
+        // Now create server with the actual session ID
+        server = this.serverFactory(sessionId);
+
+        const sessionData: SessionData = {
+          transport,
+          server,
+          metadata: {} // Empty metadata initially, will be populated by initialize handler
+        };
         this.sessions.set(sessionId, sessionData);
       },
     });
@@ -118,10 +143,16 @@ export class MCPSessionManager {
       }
     };
 
+    // If server wasn't created synchronously (shouldn't happen), create with temp ID
+    if (!server) {
+      const tempId = randomUUID();
+      server = this.serverFactory(tempId);
+    }
+
     // Connect transport to MCP server
     await server.connect(transport);
 
-    return { transport, server };
+    return { transport, server, metadata: {} };
   }
 
   /**
@@ -134,6 +165,28 @@ export class MCPSessionManager {
 
     const req = body as { method?: string };
     return req.method === 'initialize';
+  }
+
+  /**
+   * Update session metadata (called from initialize handler)
+   */
+  updateSessionMetadata(sessionId: string, metadata: SessionMetadata): void {
+    const sessionData = this.sessions.get(sessionId);
+    if (sessionData) {
+      sessionData.metadata = { ...sessionData.metadata, ...metadata };
+      console.log(`[MCP HTTP] Session ${sessionId} metadata updated:`, {
+        clientName: metadata.clientInfo?.name,
+        clientVersion: metadata.clientInfo?.version,
+        supportsAsyncTasks: metadata.capabilities?.tasks || false,
+      });
+    }
+  }
+
+  /**
+   * Get session metadata
+   */
+  getSessionMetadata(sessionId: string): SessionMetadata | undefined {
+    return this.sessions.get(sessionId)?.metadata;
   }
 
   /**

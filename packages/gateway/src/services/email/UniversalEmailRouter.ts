@@ -15,6 +15,7 @@ import { CredentialManager } from '../credential-manager.js';
 import { VirtualIdManager } from '../VirtualIdManager.js';
 import type { Database } from '../../db/index.js';
 import type { Account, ListEmailsArgs, SendEmailArgs, SearchEmailsArgs, Email, VirtualEmail } from './types.js';
+import type { ProviderExecutionOptions } from './IEmailProvider.js';
 
 export class UniversalEmailRouter {
   private virtualIdManager: VirtualIdManager;
@@ -74,8 +75,10 @@ export class UniversalEmailRouter {
    * List emails from ALL email accounts
    * Aggregates results from Gmail, Outlook, and any other connected providers
    * Returns VirtualEmail objects with virtual IDs (service abstraction)
+   *
+   * @param options - Execution options (signal currently not used, see ProviderExecutionOptions)
    */
-  async listEmails(args: Record<string, unknown>): Promise<ActionResult> {
+  async listEmails(args: Record<string, unknown>, options?: ProviderExecutionOptions): Promise<ActionResult> {
     console.error('[UniversalEmailRouter] listEmails called with args:', JSON.stringify(args));
 
     // Get all email accounts
@@ -104,7 +107,8 @@ export class UniversalEmailRouter {
     console.error('[UniversalEmailRouter] Querying EmailService with:', JSON.stringify(listArgs));
 
     // Query all accounts via EmailService
-    const emails = await emailService.listEmails(accounts, listArgs);
+    // Note: options parameter exists but signal is currently not used (see ProviderExecutionOptions)
+    const emails = await emailService.listEmails(accounts, listArgs, options);
     console.error(`[UniversalEmailRouter] EmailService returned ${emails.length} email(s)`);
 
     // Translate all emails to virtual IDs
@@ -125,8 +129,10 @@ export class UniversalEmailRouter {
   /**
    * Read a single email by virtual ID
    * Resolves virtual ID to real account and email IDs, then queries provider
+   *
+   * @param options - Execution options (signal currently not used, see ProviderExecutionOptions)
    */
-  async readEmail(args: Record<string, unknown>): Promise<ActionResult> {
+  async readEmail(args: Record<string, unknown>, options?: ProviderExecutionOptions): Promise<ActionResult> {
     const virtualEmailId = args.email_id as string;
 
     if (!virtualEmailId) {
@@ -160,7 +166,8 @@ export class UniversalEmailRouter {
     }
 
     // Read email from provider
-    const email = await emailService.readEmail(account as Account, emailId);
+    // Note: options parameter exists but signal is currently not used (see ProviderExecutionOptions)
+    const email = await emailService.readEmail(account as Account, emailId, options);
 
     // Translate to virtual email for response
     const virtualEmail = await this.translateToVirtualEmail(email);
@@ -177,8 +184,10 @@ export class UniversalEmailRouter {
   /**
    * Send an email from primary account (or specified account)
    * Accepts optional virtual account ID - defaults to primary account
+   *
+   * @param options - Execution options (signal currently not used, see ProviderExecutionOptions)
    */
-  async sendEmail(args: Record<string, unknown>): Promise<ActionResult> {
+  async sendEmail(args: Record<string, unknown>, options?: ProviderExecutionOptions): Promise<ActionResult> {
     let account: Account;
 
     // If account_id specified, resolve virtual ID to real account ID
@@ -232,7 +241,8 @@ export class UniversalEmailRouter {
       throw new Error('to, subject, and body are required fields');
     }
 
-    const result = await emailService.sendEmail(account, sendArgs);
+    // Note: options parameter exists but signal is currently not used (see ProviderExecutionOptions)
+    const result = await emailService.sendEmail(account, sendArgs, options);
 
     if (!result.success) {
       throw new Error(result.error || 'Failed to send email');
@@ -254,8 +264,10 @@ export class UniversalEmailRouter {
   /**
    * Search emails across ALL email accounts
    * Returns VirtualEmail objects with virtual IDs (service abstraction)
+   *
+   * @param options - Execution options (signal currently not used, see ProviderExecutionOptions)
    */
-  async searchEmails(args: Record<string, unknown>): Promise<ActionResult> {
+  async searchEmails(args: Record<string, unknown>, options?: ProviderExecutionOptions): Promise<ActionResult> {
     const accounts = await this.getAllEmailAccounts();
 
     if (accounts.length === 0) {
@@ -282,7 +294,8 @@ export class UniversalEmailRouter {
       throw new Error('query is required for searching emails');
     }
 
-    const emails = await emailService.searchEmails(accounts, searchArgs);
+    // Note: options parameter exists but signal is currently not used (see ProviderExecutionOptions)
+    const emails = await emailService.searchEmails(accounts, searchArgs, options);
 
     // Translate all emails to virtual IDs
     const virtualEmails = await Promise.all(

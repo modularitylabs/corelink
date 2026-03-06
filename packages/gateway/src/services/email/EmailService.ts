@@ -6,7 +6,7 @@
  * across all providers.
  */
 
-import type { IEmailProvider } from './IEmailProvider.js';
+import type { IEmailProvider, ProviderExecutionOptions } from './IEmailProvider.js';
 import type {
   Account,
   Email,
@@ -59,9 +59,10 @@ export class EmailService {
    *
    * @param accounts - List of email accounts to query
    * @param args - Listing parameters
+   * @param options - Execution options (abort signal, etc.)
    * @returns Aggregated and sorted email list
    */
-  async listEmails(accounts: Account[], args: ListEmailsArgs): Promise<Email[]> {
+  async listEmails(accounts: Account[], args: ListEmailsArgs, options?: ProviderExecutionOptions): Promise<Email[]> {
     if (accounts.length === 0) {
       return [];
     }
@@ -82,7 +83,7 @@ export class EmailService {
           provider.listEmails(account, {
             ...args,
             max_results: maxResults, // Request full amount from each
-          })
+          }, options)
         );
       } catch (error) {
         console.error(
@@ -112,9 +113,10 @@ export class EmailService {
    *
    * @param account - The account that owns the email
    * @param emailId - Provider-specific email ID
+   * @param options - Execution options (abort signal, etc.)
    * @returns Full email details
    */
-  async readEmail(account: Account, emailId: string): Promise<Email> {
+  async readEmail(account: Account, emailId: string, options?: ProviderExecutionOptions): Promise<Email> {
     // Check cache first
     const cacheKey = `email:${account.id}:${emailId}`;
     const cached = this.cache.get(cacheKey);
@@ -128,7 +130,7 @@ export class EmailService {
     }
 
     // Fetch with retry
-    const email = await withApiRetry(() => provider.readEmail(account, emailId));
+    const email = await withApiRetry(() => provider.readEmail(account, emailId, options));
 
     // Cache the result
     this.cache.set(cacheKey, email);
@@ -141,16 +143,17 @@ export class EmailService {
    *
    * @param account - The account to send from (or primary account if not specified)
    * @param args - Email content and recipients
+   * @param options - Execution options (abort signal, etc.)
    * @returns Send result with message ID
    */
-  async sendEmail(account: Account, args: SendEmailArgs): Promise<EmailResult> {
+  async sendEmail(account: Account, args: SendEmailArgs, options?: ProviderExecutionOptions): Promise<EmailResult> {
     const provider = this.providers.get(account.pluginId);
     if (!provider) {
       throw new Error(`No provider found for ${account.pluginId}`);
     }
 
     // Sending is critical - use retry logic
-    const result = await withApiRetry(() => provider.sendEmail(account, args));
+    const result = await withApiRetry(() => provider.sendEmail(account, args, options));
 
     // Invalidate cache for sent folder (if applicable)
     // TODO: Implement more granular cache invalidation
@@ -163,9 +166,10 @@ export class EmailService {
    *
    * @param accounts - List of email accounts to search
    * @param args - Search query and filters
+   * @param options - Execution options (abort signal, etc.)
    * @returns Aggregated search results sorted by relevance/timestamp
    */
-  async searchEmails(accounts: Account[], args: SearchEmailsArgs): Promise<Email[]> {
+  async searchEmails(accounts: Account[], args: SearchEmailsArgs, options?: ProviderExecutionOptions): Promise<Email[]> {
     if (accounts.length === 0) {
       return [];
     }
@@ -185,7 +189,7 @@ export class EmailService {
           provider.searchEmails(account, {
             ...args,
             max_results: maxResults,
-          })
+          }, options)
         );
       } catch (error) {
         console.error(
